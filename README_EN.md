@@ -187,7 +187,11 @@ Apache License 2.0
 - **[KONI](https://github.com/KISTI-AI/KONI)** - KISTI Science and Technology Information Specialized Language Model
 - **[KISTI-MCP](https://github.com/KISTI-AI/KISTI-MCP)** - KISTI Model Context Protocol Server
 
-## Support
+## Technology Transfer Inquiries
+
+- Yong Lee: [ryonglee@kisti.re.kr](mailto:ryonglee@kisti.re.kr)
+
+## Technical Support
 
 - Bug Reports: [GitHub Issues](https://github.com/Byun11/Dorea-pdf-ai/issues)
 - Email: [9722jayon@gmail.com](mailto:9722jayon@gmail.com)
