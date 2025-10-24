@@ -32,6 +32,7 @@ import shutil
 import json
 import httpx
 import uuid
+import asyncio
 
 # 내부 모듈 imports  
 from database import get_db, User, PDFFile, ChatSession, ChatMessage, SessionLocal
@@ -56,8 +57,8 @@ class FileStatusRequest(BaseModel):
 # 환경 설정
 # ==========================================
 
-# HURIDOCS API URL
-DOCKER_API_URL = os.getenv("DOCKER_API_URL", "http://huridocs:5060")
+# Docling-serve API URL
+DOCKER_API_URL = os.getenv("DOCKER_API_URL", "http://docling-serve:5060")
 
 # 파일 저장 경로
 FILES_DIR = Path("/app/DATABASE/files/users")
@@ -110,6 +111,201 @@ def check_pdf_has_text(file_path: str) -> dict:
             "confidence": "error"
         }
 
+
+#===========================================
+# docling json -> huridocs segments 변환 함수
+#===========================================
+
+def convert_docling_to_segments(docling_json: dict) -> list:
+    """Docling JSON을 HURIDOCS segments.json 형식으로 변환"""
+    segments = []
+
+    # 페이지 높이 정보 추출 (coord_origin 변환에 필요)
+    try:
+        page_heights = {}
+        for page_no, page_data in docling_json.get('pages', {}).items():
+            page_heights[int(page_no)] = page_data.get('size', {}).get('height', 841.9199829101562)
+    except Exception as e:
+        print(f"❌ 페이지 높이 정보 추출 실패: {e}")
+        raise Exception(f"❌ Docling JSON 변환 실패: 페이지 높이 정보 추출 실패 - {e}")
+
+
+
+    # texts 배열 처리
+    for text_item in docling_json.get('texts', []):
+        # page_header, page_footer는 필터링
+        if text_item.get('label') in ['page_header', 'page_footer']:
+            continue
+        
+        for prov in text_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            segment = {
+                'id': text_item.get('self_ref', '').replace('#/', ''), # 디버그용
+                'type': map_docling_label_to_segment_type(text_item.get('label')),
+                'text': text_item.get('orig', text_item.get('text', '')),
+                'page_number': page_no,
+                'left': converted_bbox['left'],
+                'top': converted_bbox['top'],
+                'width': converted_bbox['width'],
+                'height': converted_bbox['height'],
+                'confidence': 1.0
+            }
+            segments.append(segment)
+    
+    # pictures 배열 처리
+    for picture_item in docling_json.get('pictures', []):
+        for prov in picture_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            # # children에서 캡션 텍스트 추출 (있는 경우)
+            caption_text = ''
+            # for child_ref in picture_item.get('children', []):
+            #     child_id = child_ref.get('$ref', '').replace('#/', '')
+            #     # texts 배열에서 해당 child 찾기
+            #     for text in docling_json.get('texts', []):
+            #         if text.get('self_ref', '').replace('#/', '') == child_id:
+            #             caption_text += text.get('text', '') + ' '
+
+            segment = {
+                'id': picture_item.get('self_ref', '').replace('#/', ''), # 디버그용
+                'type': 'Picture',
+                'text': caption_text.strip(),  # 캡션이 있으면 포함
+                'page_number': page_no,
+                'left': converted_bbox['left'],
+                'top': converted_bbox['top'],
+                'width': converted_bbox['width'],
+                'height': converted_bbox['height'],
+                'confidence': 1.0
+            }
+            segments.append(segment)
+
+    # tables 배열 처리
+    for table_item in docling_json.get('tables', []):
+        for prov in table_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            # 테이블 텍스트 추출
+            table_text = extract_table_text(table_item)
+
+            segment = {
+                'id': table_item.get('self_ref', '').replace('#/', ''), # 디버그용
+                'type': 'Table',
+                'text': table_text,
+                'page_number': page_no,
+                'left': converted_bbox['left'],
+                'top': converted_bbox['top'],
+                'width': converted_bbox['width'],
+                'height': converted_bbox['height'],
+                'confidence': 1.0,
+                'table_data': table_item.get('data')  # 원본 테이블 데이터 보존
+            }
+            segments.append(segment)
+    
+    # groups 처리 향후 예정
+    # for group_item in docling_json.get('groups', []):
+    #     pass
+
+    return segments
+
+def convert_bbox_coordinates(bbox: dict, coord_origin: str, page_height: float) -> dict:
+    """
+    Docling 좌표계를 HURIDOCS 좌표계로 변환
+
+    Docling: BOTTOMLEFT 원점 (왼쪽 하단이 (0,0))
+    HURIDOCS: TOPLEFT 원점 (왼쪽 상단이 (0,0))
+    """
+    l = bbox.get('l', 0)
+    r = bbox.get('r', 0)
+    t = bbox.get('t', 0)
+    b = bbox.get('b', 0)
+
+    if coord_origin == 'BOTTOMLEFT':
+        # BOTTOMLEFT → TOPLEFT 변환
+        new_top = page_height - t
+        new_bottom = page_height - b
+
+        return {
+            'left': l,
+            'top': new_top,
+            'width': r - l,
+            'height': new_bottom - new_top
+        }
+    elif coord_origin == 'TOPLEFT':
+        # 이미 TOPLEFT이면 변환 불필요
+        return {
+            'left': l,
+            'top': t,
+            'width': r - l,
+            'height': b - t
+        }
+    else:
+        print(f"알 수 없는 coord_origin: {coord_origin}")
+        return {
+            'left': l,
+            'top': t,
+            'width': r - l,
+            'height': b - t
+        }
+
+def map_docling_label_to_segment_type(label: str) -> str:
+    """Docling label을 HURIDOCS segment type으로 매핑"""
+    mapping = {
+        'text': 'Text',
+        'paragraph': 'Text',
+        'section_header': 'Section header',
+        'caption': 'Text',
+        'list_item': 'List item',
+        'page_header': 'Text',
+        'page_footer': 'Text',
+        'picture': 'Picture',
+        'table': 'Table',
+        'footnote': 'Text',
+        'reference': 'Text'
+    }
+    return mapping.get(label, 'Text')
+
+def extract_table_text(table_item: dict) -> str:
+    """
+    Docling 테이블 구조에서 텍스트 추출
+    data.grid 구조를 평문으로 변환
+    """
+    text_parts = []
+
+    # data.grid가 있는 경우
+    table_data = table_item.get('data', {})
+    grid = table_data.get('grid', [])
+
+    if grid:
+        for row in grid:
+            row_texts = []
+            for cell in row:
+                cell_text = cell.get('orig', cell.get('text', '')).strip()
+                if cell_text:
+                    row_texts.append(cell_text)
+            if row_texts:
+                text_parts.append(' | '.join(row_texts))
+        
+        return '\n'.join(text_parts)
+    
+    # grid가 없으면 text 필드 사용
+    return table_item.get('orig', table_item.get('text', ''))
+
 # ==========================================
 # 백그라운드 처리 함수
 # ==========================================
@@ -147,46 +343,63 @@ async def process_pdf_file(file_id: str):
             raise FileNotFoundError(f"원본 파일을 찾을 수 없습니다: {original_path}")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
-            segments_response = None
-            if db_file.use_ocr:
-                print(f"🔍 [File ID: {file_id}] OCR 분석 모드로 처리 중...")
-                with open(original_path, "rb") as f:
-                    ocr_response = await client.post(
-                        f"{DOCKER_API_URL}/ocr",
-                        files={"file": (db_file.filename, f, "application/pdf")},
-                        data={"language": db_file.language}
-                    )
-                if ocr_response.status_code != 200:
-                    raise Exception(f"OCR 처리 실패: {ocr_response.status_code} - {ocr_response.text}")
-                
-                ocr_content = ocr_response.content
-                ocr_path = file_dir / f"ocr_{db_file.filename}"
-                ocr_path.write_bytes(ocr_content)
-                print(f"✅ [File ID: {file_id}] OCR 처리 완료 및 저장: {ocr_path}")
-                
-                with open(ocr_path, "rb") as f_ocr:
-                    segments_response = await client.post(
-                        f"{DOCKER_API_URL}/",
-                        files={"file": (db_file.filename, f_ocr, "application/pdf")},
-                        data={"fast": "false"}
-                    )
-            else:
-                print(f"⚡ [File ID: {file_id}] 빠른 분석 모드로 처리 중...")
-                with open(original_path, "rb") as f:
-                    segments_response = await client.post(
-                        f"{DOCKER_API_URL}/",
-                        files={"file": (db_file.filename, f, "application/pdf")},
-                        data={"fast": "false"}
-                    )
+            # 1. 비동기 작업 제출
+            with open(original_path, "rb") as f:
+                files = {"files": (db_file.filename, f, "application/pdf")}
+                data = {
+                    "to_formats": ["json"],
+                    "do_ocr": True,
+                    "ocr_engine": "easyocr",
+                    "ocr_lang": ["en", "ko"], # 일단 en, ko 로 고정 # [db_file.language] if db_file.language else ["en", "ko"],
+                    "pdf_backend": "dlparse_v4",
+                    "target_type": "inbody"
+                }
 
-            if segments_response and segments_response.status_code == 200:
-                segments_data = segments_response.json()
+                task_response = await client.post(
+                    f"{DOCKER_API_URL}/v1/convert/file/async",
+                    files=files,
+                    data=data
+                )
+            
+            if task_response.status_code != 200:
+                raise Exception(f"작업 제출 실패: {task_response.status_code}")
+            
+            task_data = task_response.json()
+            task_id = task_data["task_id"]
+
+            # 2. 작업 완료 대기 (폴링)
+            while True:
+                status_response = await client.get(
+                    f"{DOCKER_API_URL}/v1/status/poll/{task_id}"
+                )
+                status = status_response.json()
+                
+                if status["task_status"] == "success":
+                    break
+                elif status["task_status"] == "failure":
+                    raise Exception("문서 변환 실패")
+                
+                await asyncio.sleep(5)
+            
+            # 3. 결과 가져오기
+            result_response = await client.get(
+                f"{DOCKER_API_URL}/v1/result/{task_id}"
+            )
+
+            if result_response.status_code == 200:
+                result = result_response.json()
+                segments_data = convert_docling_to_segments(result["document"]["json_content"])
                 
                 # 파일 이름에서 확장자 제거 후 .json 추가 (버그 수정)
                 file_stem = Path(db_file.filename).stem
                 segments_path = file_dir / f"segments_{file_stem}.json"
                 with open(segments_path, "w", encoding="utf-8") as f:
                     json.dump(segments_data, f, ensure_ascii=False, indent=2)
+
+                # 원본 Docling JSON도 보관 (디버깅용)
+                docling_path = file_dir / f"docling_{file_stem}.json"
+                with open(docling_path, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
                 
                 print(f"✅ [File ID: {file_id}] 세그먼트 추출 완료: {len(segments_data)}개")
                 db_file.status = "completed"
@@ -194,6 +407,7 @@ async def process_pdf_file(file_id: str):
                 db_file.segments_data = segments_data
                 db.commit()
                 
+                # 채팅 세션 생성
                 try:
                     first_session = ChatSession(
                         user_id=db_file.user_id,
@@ -204,10 +418,10 @@ async def process_pdf_file(file_id: str):
                     db.commit()
                     print(f"✅ [File ID: {file_id}] 첫 번째 채팅 세션 자동 생성 완료")
                 except Exception as session_error:
-                    print(f"⚠️ [File ID: {file_id}] 세션 생성 오류 (파일 처리는 성공): {session_error}")
+                    print(f"⚠️ 세션 생성 오류: {session_error}")
             else:
-                error_detail = segments_response.text if segments_response else "세그먼트 분석 서비스에서 응답이 없습니다."
-                raise Exception(f"세그먼트 추출 실패: {error_detail}")
+                raise Exception(f"문서 변환 결과 가져오기 실패: {result_response.status_code}")
+
 
     except Exception as e:
         print(f"❌ [File ID: {file_id}] 전체 처리 오류: {e}")

@@ -25,7 +25,7 @@ from pathlib import Path
 from datetime import datetime
 
 # Environment variables
-DOCKER_API_URL = "http://huridocs:5060"
+DOCKER_API_URL = os.getenv("DOCKER_API_URL", "http://docling-serve:5060")
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL", "http://ollama:11434")
 
 # FastAPI 앱 생성
@@ -103,19 +103,19 @@ class MultiSegmentRequest(BaseModel):
 async def health_check():
     """헬스체크 엔드포인트"""
     try:
-        # HURIDOCS API 연결 테스트
+        # Docling-serve API 연결 테스트
         async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{DOCKER_API_URL}/")
-            huridocs_status = "ok" if response.status_code == 200 else "error"
+            response = await client.get(f"{DOCKER_API_URL}/health")
+            docling_serve_status = "ok" if response.status_code == 200 else "error"
     except:
-        huridocs_status = "error"
+        docling_serve_status = "error"
     
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "services": {
             "backend": "ok",
-            "huridocs": huridocs_status,
+            "Docling-serve": docling_serve_status,
             "database": "ok"
         }
     }
