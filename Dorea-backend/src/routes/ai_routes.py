@@ -78,9 +78,9 @@ async def get_user_ai_provider_by_user(user: User, db: Session) -> tuple:
     
     if not settings:
         # 기본값 반환 (GPT)
-        return "gpt", None
+        return "gpt", None, None, "gpt-4o"
     
-    return settings.selected_model_provider, settings.selected_ollama_model
+    return settings.selected_model_provider, settings.selected_ollama_model, settings.openai_base_url, settings.openai_model
 
 async def call_ollama_api(model_name: str, messages: list, stream: bool = False, images: list = None) -> dict:
     """Ollama API 호출 (멀티모달 지원)"""
@@ -176,54 +176,6 @@ async def check_ollama_model_multimodal_support(model_name: str) -> bool:
         multimodal_support_cache[model_name] = False
         return False
 
-async def send_openai_query(query: str, api_key: str, base64_image: Optional[str] = None):
-    """OpenAI API 호출 헬퍼 함수"""
-    try:
-        client = create_openai_client(api_key)
-        
-        messages = [
-            {
-                "role": "system",
-                "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
-            }
-        ]
-        
-        if base64_image:
-            # 🆕 base64 이미지 정리 - dataURL 헤더 제거
-            if base64_image.startswith('data:image'):
-                base64_image = base64_image.split(',')[1]
-            
-            messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": query},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{base64_image}"}
-                    }
-                ]
-            })
-            model = "gpt-4o"
-        else:
-            messages.append({
-                "role": "user", 
-                "content": query
-            })
-            model = "gpt-4o"
-        
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            max_tokens=1000,
-            temperature=0.7
-        )
-        
-        return {"result": response.choices[0].message.content.strip()}
-        
-    except Exception as e:
-        pass  # 로그 제거
-        raise HTTPException(status_code=500, detail=f"OpenAI API 오류: {str(e)}")
-
 # ==========================================
 # 라우터 설정
 # ==========================================
@@ -235,284 +187,284 @@ router = APIRouter(prefix="/api", tags=["AI"])
 # ==========================================
 
 # TODO: 현재 사용되지 않음 - 클라이언트에서 /multi-segment-stream만 사용 중
-@router.post("/stream")
-async def stream_gpt_response(
-    request: QueryRequest, 
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """AI 응답을 실제 스트리밍으로 반환 - GPT/Ollama 분기 지원"""
+# @router.post("/stream")
+# async def stream_gpt_response(
+#     request: QueryRequest, 
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """AI 응답을 실제 스트리밍으로 반환 - GPT/Ollama 분기 지원"""
     
-    # 🔥 사용자 AI 설정을 미리 조회  
-    try:
-        provider, ollama_model = await get_user_ai_provider_by_user(current_user, db)
-    except:
-        provider, ollama_model = "gpt", None
+#     # 🔥 사용자 AI 설정을 미리 조회  
+#     try:
+#         provider, ollama_model, base_url = await get_user_ai_provider_by_user(current_user, db)
+#     except:
+#         provider, ollama_model, base_url = "gpt", None, None
     
-    # GPT 사용 시에만 API 키 확인
-    if provider == "gpt" and not current_user.api_key:
-        raise HTTPException(
-            status_code=400, 
-            detail="GPT 사용을 위해서는 OpenAI API 키가 필요합니다. 설정 페이지에서 API 키를 등록해주세요."
-        )
+#     # GPT 사용 시에만 API 키 확인
+#     if provider == "gpt" and not current_user.api_key:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="GPT 사용을 위해서는 OpenAI API 키가 필요합니다. 설정 페이지에서 API 키를 등록해주세요."
+#         )
     
-    def generate_stream():  # 🔥 일반 def로 변경하되 내부에서 async 처리
-        try:
-            # 🔥 asyncio loop를 항상 미리 생성
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+#     def generate_stream():  # 🔥 일반 def로 변경하되 내부에서 async 처리
+#         try:
+#             # 🔥 asyncio loop를 항상 미리 생성
+#             import asyncio
+#             loop = asyncio.new_event_loop()
+#             asyncio.set_event_loop(loop)
             
-            if request.text:
-                query = f"""다음 내용을 참고해서 질문에 답해줘:
+#             if request.text:
+#                 query = f"""다음 내용을 참고해서 질문에 답해줘:
 
-텍스트:
-{request.text}
+# 텍스트:
+# {request.text}
 
-질문:
-{request.query}
-"""
-            else:
-                query = request.query
+# 질문:
+# {request.query}
+# """
+#             else:
+#                 query = request.query
             
-            messages = [
-                {
-                    "role": "system",
-                    "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
-                },
-                {
-                    "role": "user",
-                    "content": query
-                }
-            ]
+#             messages = [
+#                 {
+#                     "role": "system",
+#                     "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": query
+#                 }
+#             ]
             
-            # 🔥 즉시 시작 신호
-            yield f"data: {json.dumps({'type': 'start', 'provider': provider})}\n\n"
+#             # 🔥 즉시 시작 신호
+#             yield f"data: {json.dumps({'type': 'start', 'provider': provider})}\n\n"
             
-            if provider == "ollama" and ollama_model:
-                # Ollama API 호출 - 동기 방식으로 처리
-                try:
-                    ollama_response = loop.run_until_complete(call_ollama_api(ollama_model, messages, stream=True))
+#             if provider == "ollama" and ollama_model:
+#                 # Ollama API 호출 - 동기 방식으로 처리
+#                 try:
+#                     ollama_response = loop.run_until_complete(call_ollama_api(ollama_model, messages, stream=True))
                     
-                    # Ollama 스트리밍 응답 처리 - 동기 방식
-                    for line_bytes in ollama_response.iter_lines():
-                        if line_bytes:
-                            try:
-                                line = line_bytes.decode('utf-8') if isinstance(line_bytes, bytes) else line_bytes
-                                data = json.loads(line)
-                                if "message" in data and "content" in data["message"]:
-                                    content = data["message"]["content"]
-                                    if content:
-                                        yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+#                     # Ollama 스트리밍 응답 처리 - 동기 방식
+#                     for line_bytes in ollama_response.iter_lines():
+#                         if line_bytes:
+#                             try:
+#                                 line = line_bytes.decode('utf-8') if isinstance(line_bytes, bytes) else line_bytes
+#                                 data = json.loads(line)
+#                                 if "message" in data and "content" in data["message"]:
+#                                     content = data["message"]["content"]
+#                                     if content:
+#                                         yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
                                 
-                                if data.get("done", False):
-                                    break
-                            except json.JSONDecodeError:
-                                continue
+#                                 if data.get("done", False):
+#                                     break
+#                             except json.JSONDecodeError:
+#                                 continue
                                 
-                except Exception as e:
-                    yield f"data: {json.dumps({'type': 'error', 'error': f'Ollama 오류: {str(e)}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"  # 에러 시에도 done 신호 전송
-                    return
-            else:
-                # GPT API 호출 (기본값)
-                client = create_openai_client(current_user.api_key)
+#                 except Exception as e:
+#                     yield f"data: {json.dumps({'type': 'error', 'error': f'Ollama 오류: {str(e)}'})}\n\n"
+#                     yield f"data: {json.dumps({'type': 'done'})}\n\n"  # 에러 시에도 done 신호 전송
+#                     return
+#             else:
+#                 # GPT API 호출 (기본값)
+#                 client = create_openai_client(current_user.api_key, base_url)
                 
-                stream = client.chat.completions.create(
-                    model="gpt-4o",
-                    messages=messages,
-                    max_tokens=1000,
-                    temperature=0.7,
-                    stream=True
-                )
+#                 stream = client.chat.completions.create(
+#                     model="gpt-4o",
+#                     messages=messages,
+#                     max_tokens=1000,
+#                     temperature=0.7,
+#                     stream=True
+#                 )
                 
-                # 각 청크를 받는 즉시 yield
-                for chunk in stream:
-                    if chunk.choices[0].delta.content is not None:
-                        content = chunk.choices[0].delta.content
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+#                 # 각 청크를 받는 즉시 yield
+#                 for chunk in stream:
+#                     if chunk.choices[0].delta.content is not None:
+#                         content = chunk.choices[0].delta.content
+#                         yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
             
-            # 완료 신호
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+#             # 완료 신호
+#             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+#         except Exception as e:
+#             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no"
-        }
-    )
+#     return StreamingResponse(
+#         generate_stream(),
+#         media_type="text/event-stream",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "Access-Control-Allow-Origin": "*",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
 
 # TODO: 현재 사용되지 않음 - 클라이언트에서 /multi-segment-stream만 사용 중
-@router.post("/vision-stream")
-async def stream_vision_response(
-    request: VisionRequest,
-    current_user: User = Depends(get_current_user)
-):
-    """Vision API 응답을 실제 스트리밍으로 반환"""
+# @router.post("/vision-stream")
+# async def stream_vision_response(
+#     request: VisionRequest,
+#     current_user: User = Depends(get_current_user)
+# ):
+#     """Vision API 응답을 실제 스트리밍으로 반환"""
     
-    # API 키 확인
-    if not current_user.api_key:
-        raise HTTPException(
-            status_code=400, 
-            detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
-        )
+#     # API 키 확인
+#     if not current_user.api_key:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
+#         )
     
-    def generate_stream():  # 🔥 async def 대신 def 사용!
-        try:
-            client = create_openai_client(current_user.api_key)
+#     def generate_stream():  # 🔥 async def 대신 def 사용!
+#         try:
+#             client = create_openai_client(current_user.api_key)
             
-            base64_image = request.image
-            if "base64," in base64_image:
-                base64_image = base64_image.split("base64,")[1]
+#             base64_image = request.image
+#             if "base64," in base64_image:
+#                 base64_image = base64_image.split("base64,")[1]
             
-            messages = [
-                {
-                    "role": "system",
-                    "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": request.query},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ]
+#             messages = [
+#                 {
+#                     "role": "system",
+#                     "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": [
+#                         {"type": "text", "text": request.query},
+#                         {
+#                             "type": "image_url",
+#                             "image_url": {"url": f"data:image/png;base64,{base64_image}"}
+#                         }
+#                     ]
+#                 }
+#             ]
             
-            yield f"data: {json.dumps({'type': 'start'})}\n\n"
+#             yield f"data: {json.dumps({'type': 'start'})}\n\n"
             
-            stream = client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                max_tokens=1000,
-                temperature=0.7,
-                stream=True
-            )
+#             stream = client.chat.completions.create(
+#                 model="gpt-4o",
+#                 messages=messages,
+#                 max_tokens=1000,
+#                 temperature=0.7,
+#                 stream=True
+#             )
             
-            for chunk in stream:
-                if chunk.choices[0].delta.content is not None:
-                    content = chunk.choices[0].delta.content
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+#             for chunk in stream:
+#                 if chunk.choices[0].delta.content is not None:
+#                     content = chunk.choices[0].delta.content
+#                     yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
             
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+#             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
-        except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+#         except Exception as e:
+#             yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "X-Accel-Buffering": "no"
-        }
-    )
+#     return StreamingResponse(
+#         generate_stream(),
+#         media_type="text/event-stream",
+#         headers={
+#             "Cache-Control": "no-cache",
+#             "Connection": "keep-alive",
+#             "Access-Control-Allow-Origin": "*",
+#             "X-Accel-Buffering": "no"
+#         }
+#     )
 
 # === 멀티 세그먼트 처리 ===
 
 # TODO: 현재 사용되지 않음 - 클라이언트에서 /multi-segment-stream만 사용 중
-@router.post("/multi-segment")
-async def analyze_multi_segments(
-    request: MultiSegmentRequest,
-    current_user: User = Depends(get_current_user)
-):
-    """다중 세그먼트 분석"""
-    # API 키 확인
-    if not current_user.api_key:
-        raise HTTPException(
-            status_code=400, 
-            detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
-        )
+# @router.post("/multi-segment")
+# async def analyze_multi_segments(
+#     request: MultiSegmentRequest,
+#     current_user: User = Depends(get_current_user)
+# ):
+#     """다중 세그먼트 분석"""
+#     # API 키 확인
+#     if not current_user.api_key:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
+#         )
         
-    try:
-        client = create_openai_client(current_user.api_key)
+#     try:
+#         client = create_openai_client(current_user.api_key)
         
-        # 세그먼트들을 분석해서 메시지 구성
-        content_parts = []
-        has_images = False
+#         # 세그먼트들을 분석해서 메시지 구성
+#         content_parts = []
+#         has_images = False
         
-        # 텍스트 세그먼트들 먼저 처리
-        text_context = f"사용자 질문: {request.query}\n\n"
-        text_context += f"다음 {len(request.segments)}개 영역을 종합하여 답변해주세요:\n\n"
+#         # 텍스트 세그먼트들 먼저 처리
+#         text_context = f"사용자 질문: {request.query}\n\n"
+#         text_context += f"다음 {len(request.segments)}개 영역을 종합하여 답변해주세요:\n\n"
         
-        for i, segment in enumerate(request.segments):
-            if segment['type'] == 'text':
-                text_context += f"[영역 {i+1}] 페이지 {segment.get('page', '?')}:\n"
-                text_context += f"{segment['content']}\n\n"
-            elif segment['type'] == 'image':
-                has_images = True
-                text_context += f"[영역 {i+1}] 페이지 {segment.get('page', '?')}: {segment.get('description', '이미지')}\n\n"
+#         for i, segment in enumerate(request.segments):
+#             if segment['type'] == 'text':
+#                 text_context += f"[영역 {i+1}] 페이지 {segment.get('page', '?')}:\n"
+#                 text_context += f"{segment['content']}\n\n"
+#             elif segment['type'] == 'image':
+#                 has_images = True
+#                 text_context += f"[영역 {i+1}] 페이지 {segment.get('page', '?')}: {segment.get('description', '이미지')}\n\n"
         
-        if has_images:
-            # 이미지가 있으면 Vision API 사용
-            content_parts.append({"type": "text", "text": text_context})
+#         if has_images:
+#             # 이미지가 있으면 Vision API 사용
+#             content_parts.append({"type": "text", "text": text_context})
             
-            # 이미지들 추가
-            for segment in request.segments:
-                if segment['type'] == 'image' and segment.get('content'):
-                    image_data = segment['content']
-                    if "base64," in image_data:
-                        image_data = image_data.split("base64,")[1]
+#             # 이미지들 추가
+#             for segment in request.segments:
+#                 if segment['type'] == 'image' and segment.get('content'):
+#                     image_data = segment['content']
+#                     if "base64," in image_data:
+#                         image_data = image_data.split("base64,")[1]
                     
-                    content_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_data}"}
-                    })
+#                     content_parts.append({
+#                         "type": "image_url",
+#                         "image_url": {"url": f"data:image/png;base64,{image_data}"}
+#                     })
             
-            messages = [
-                {
-                    "role": "system",
-                    "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 텍스트와 이미지를 종합하여 한국어로 자세하고 정확하게 답변해주세요."
-                },
-                {
-                    "role": "user",
-                    "content": content_parts
-                }
-            ]
+#             messages = [
+#                 {
+#                     "role": "system",
+#                     "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 텍스트와 이미지를 종합하여 한국어로 자세하고 정확하게 답변해주세요."
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": content_parts
+#                 }
+#             ]
             
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                max_tokens=1500,
-                temperature=0.7
-            )
-        else:
-            # 텍스트만 있으면 일반 GPT 사용
-            messages = [
-                {
-                    "role": "system",
-                    "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
-                },
-                {
-                    "role": "user",
-                    "content": text_context
-                }
-            ]
+#             response = client.chat.completions.create(
+#                 model="gpt-4o",
+#                 messages=messages,
+#                 max_tokens=1500,
+#                 temperature=0.7
+#             )
+#         else:
+#             # 텍스트만 있으면 일반 GPT 사용
+#             messages = [
+#                 {
+#                     "role": "system",
+#                     "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": text_context
+#                 }
+#             ]
             
-            response = client.chat.completions.create(
-                model="gpt-4o",
-                messages=messages,
-                max_tokens=1500,
-                temperature=0.7
-            )
+#             response = client.chat.completions.create(
+#                 model="gpt-4o",
+#                 messages=messages,
+#                 max_tokens=1500,
+#                 temperature=0.7
+#             )
         
-        return {"result": response.choices[0].message.content.strip()}
+#         return {"result": response.choices[0].message.content.strip()}
         
-    except Exception as e:
-        pass  # 로그 제거
-        raise HTTPException(status_code=500, detail=f"멀티 세그먼트 분석 오류: {str(e)}")
+#     except Exception as e:
+#         pass  # 로그 제거
+#         raise HTTPException(status_code=500, detail=f"멀티 세그먼트 분석 오류: {str(e)}")
 
 @router.post("/multi-segment-stream")
 async def stream_multi_segment_response(
@@ -524,9 +476,9 @@ async def stream_multi_segment_response(
     
     # 🔥 사용자 AI 설정을 미리 조회  
     try:
-        provider, ollama_model = await get_user_ai_provider_by_user(current_user, db)
+        provider, ollama_model, base_url, openai_model = await get_user_ai_provider_by_user(current_user, db)
     except:
-        provider, ollama_model = "gpt", None
+        provider, ollama_model, base_url, openai_model = "gpt", None, None, "gpt-4o"
 
     # GPT 사용 시에만 API 키 확인
     if provider == "gpt" and not current_user.api_key:
@@ -638,8 +590,8 @@ async def stream_multi_segment_response(
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"  # 에러 시에도 done 신호 전송
                     return
             else:
-                # GPT API 호출 (기본값 또는 이미지 포함)
-                client = create_openai_client(current_user.api_key)
+                # OpenAI API 호출 (기본값 또는 이미지 포함)
+                client = create_openai_client(current_user.api_key, base_url)
                 
                 if has_images:
                     content_parts.append({"type": "text", "text": text_context})
@@ -701,7 +653,7 @@ async def stream_multi_segment_response(
                 
                 
                 stream = client.chat.completions.create(
-                    model="gpt-4o",
+                    model=openai_model,
                     messages=messages,
                     max_tokens=1500,
                     temperature=0.7,
@@ -729,9 +681,10 @@ async def stream_multi_segment_response(
         }
     )
 # 기존 send_openai_query 함수를 이것으로 교체
-async def send_openai_query(query: str, api_key: str, base64_image: Optional[str] = None):
+async def send_openai_query(query: str, api_key: str, base64_image: Optional[str] = None, base_url: Optional[str] = None):
+    """OpenAI API 호출 헬퍼 함수"""
     try:
-        client = create_openai_client(current_user.api_key)
+        client = create_openai_client(current_user.api_key, base_url)
         
         messages = [
             {
@@ -778,97 +731,97 @@ async def send_openai_query(query: str, api_key: str, base64_image: Optional[str
 
 # AI 질문 응답 (GPT/Ollama 분기 지원)
 # TODO: 현재 사용되지 않음 - 클라이언트에서 /multi-segment-stream만 사용 중
-@router.post("/ask")
-async def ask_gpt(
-    request: QueryRequest, 
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """AI에게 질문하기 - GPT/Ollama 분기 지원"""
+# @router.post("/ask")
+# async def ask_gpt(
+#     request: QueryRequest, 
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """AI에게 질문하기 - GPT/Ollama 분기 지원"""
     
-    # API 키 확인
-    if not current_user.api_key:
-        raise HTTPException(
-            status_code=400, 
-            detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
-        )
+#     # API 키 확인
+#     if not current_user.api_key:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
+#         )
     
-    try:
-        # 사용자 AI 설정 조회
-        provider, ollama_model = await get_user_ai_provider_by_user(current_user, db)
+#     try:
+#         # 사용자 AI 설정 조회
+#         provider, ollama_model, base_url = await get_user_ai_provider_by_user(current_user, db)
         
-        if request.text:
-            query = f"""다음 내용을 참고해서 질문에 답해줘:
+#         if request.text:
+#             query = f"""다음 내용을 참고해서 질문에 답해줘:
 
-텍스트:
-{request.text}
+# 텍스트:
+# {request.text}
 
-질문:
-{request.query}
-"""
-        else:
-            query = request.query
+# 질문:
+# {request.query}
+# """
+#         else:
+#             query = request.query
         
-        messages = [
-            {
-                "role": "system",
-                "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
-            },
-            {
-                "role": "user",
-                "content": query
-            }
-        ]
+#         messages = [
+#             {
+#                 "role": "system",
+#                 "content": "당신은 PDF 문서 분석을 도와주는 AI 어시스턴트입니다. 한국어로 자세하고 정확하게 답변해주세요."
+#             },
+#             {
+#                 "role": "user",
+#                 "content": query
+#             }
+#         ]
         
-        if provider == "ollama" and ollama_model:
-            # Ollama API 호출
-            result = await call_ollama_api(ollama_model, messages, stream=False)
-            return result
-        else:
-            # GPT API 호출 (기본값)
-            return await send_openai_query(query, api_key)
+#         if provider == "ollama" and ollama_model:
+#             # Ollama API 호출
+#             result = await call_ollama_api(ollama_model, messages, stream=False)
+#             return result
+#         else:
+#             # GPT API 호출 (기본값)
+#             return await send_openai_query(query, api_key, base_url)
             
-    except Exception as e:
-        pass  # 로그 제거
-        raise HTTPException(status_code=500, detail=f"AI 질문 처리 오류: {str(e)}")
+#     except Exception as e:
+#         pass  # 로그 제거
+#         raise HTTPException(status_code=500, detail=f"AI 질문 처리 오류: {str(e)}")
 
 
 # TODO: 현재 사용되지 않음 - 클라이언트에서 /multi-segment-stream만 사용 중
-@router.post("/vision")
-async def vision_analysis(request: VisionRequest, current_user: User = Depends(get_current_user)):
-    """이미지를 GPT Vision으로 분석"""
+# @router.post("/vision")
+# async def vision_analysis(request: VisionRequest, current_user: User = Depends(get_current_user)):
+#     """이미지를 GPT Vision으로 분석"""
     
-    # API 키 확인
-    if not current_user.api_key:
-        raise HTTPException(
-            status_code=400, 
-            detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
-        )
+#     # API 키 확인
+#     if not current_user.api_key:
+#         raise HTTPException(
+#             status_code=400, 
+#             detail="API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 등록해주세요."
+#         )
     
-    try:
-        print(f"🔍 Vision 요청 받음")
-        print(f"📝 Query: {request.query}")
-        print(f"🖼️ 이미지 데이터 길이: {len(request.image) if request.image else 0}")
+#     try:
+#         print(f"🔍 Vision 요청 받음")
+#         print(f"📝 Query: {request.query}")
+#         print(f"🖼️ 이미지 데이터 길이: {len(request.image) if request.image else 0}")
         
-        # 🆕 이미지 크기 체크
-        if len(request.image) > 100000:  # 100KB 제한
-            print(f"⚠️ 이미지가 너무 큼: {len(request.image)} bytes")
-            raise HTTPException(status_code=400, detail="이미지 크기가 너무 큽니다. 더 작은 영역을 선택해주세요.")
+#         # 🆕 이미지 크기 체크
+#         if len(request.image) > 100000:  # 100KB 제한
+#             print(f"⚠️ 이미지가 너무 큼: {len(request.image)} bytes")
+#             raise HTTPException(status_code=400, detail="이미지 크기가 너무 큽니다. 더 작은 영역을 선택해주세요.")
         
-        # dataURL 형식에서 base64 추출
-        base64_image = request.image
-        if "base64," in base64_image:
-            base64_image = base64_image.split("base64,")[1]
-            print(f"✅ Base64 추출 완료, 길이: {len(base64_image)}")
+#         # dataURL 형식에서 base64 추출
+#         base64_image = request.image
+#         if "base64," in base64_image:
+#             base64_image = base64_image.split("base64,")[1]
+#             print(f"✅ Base64 추출 완료, 길이: {len(base64_image)}")
         
-        result = await send_openai_query(request.query, api_key, base64_image)
-        print(f"✅ OpenAI 응답 받음")
+#         result = await send_openai_query(request.query, api_key, base64_image)
+#         print(f"✅ OpenAI 응답 받음")
         
-        return result
+#         return result
         
-    except Exception as e:
-        print(f"❌ Vision API 에러: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Vision API 오류: {str(e)}")
+#     except Exception as e:
+#         print(f"❌ Vision API 에러: {str(e)}")
+#         raise HTTPException(status_code=500, detail=f"Vision API 오류: {str(e)}")
     
 
 

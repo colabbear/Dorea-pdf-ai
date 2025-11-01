@@ -119,7 +119,9 @@ class UserSettings(Base):
     api_key_hash = Column(String(64), nullable=True, index=True)  # 마이그레이션 호환성을 위해 임시 유지
     
     # 모델 설정
-    selected_model_provider = Column(String(20), default="gpt")  # 'gpt' 또는 'ollama'
+    openai_base_url = Column(String, nullable=True) # null 이면 gpt 또는 ollama
+    openai_model = Column(String, default="gpt-4o")
+    selected_model_provider = Column(String(20), default="gpt")  # 'gpt', 'ollama', 'external'
     selected_ollama_model = Column(String(100), nullable=True)  # Ollama 모델 이름 (예: 'llama3:latest')
     
     # 타임스탬프
@@ -269,6 +271,7 @@ class EmbeddingSettings(Base):
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     provider = Column(String(50), nullable=False)  # 'ollama' or 'openai'
     model_name = Column(String(100), nullable=False)
+    base_url = Column(String(200), nullable=True) # for OpenAI compatible server
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

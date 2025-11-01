@@ -631,8 +631,30 @@ class KnowledgeManager {
                 }, 100);
             }
         } else if (settings.provider === 'openai') {
-            const select = document.getElementById('openaiEmbeddingModel');
-            if (select) select.value = settings.model_name || 'text-embedding-3-small';
+            const select = document.getElementById('openaiEmbeddingModelSelect');
+            const input = document.getElementById('openaiEmbeddingModel');
+            const baseUrlInput = document.getElementById('openaiEmbeddingBaseUrl');
+
+            if (select && input) {
+                const modelName = settings.model_name || 'text-embedding-3-small';
+                const predefinedModels = ['text-embedding-3-small', 'text-embedding-3-large', 'text-embedding-ada-002'];
+
+                if (predefinedModels.includes(modelName)) {
+                    // 기본 모델
+                    // select에서 선택, input은 비활성화 상태로 값 복사
+                    select.value = modelName;
+                    input.value = modelName;
+                    input.disabled = true;
+                } else {
+                    // 커스텀 모델
+                    // select는 'custom', input 활성화하여 값 표시
+                    select.value = 'custom';
+                    input.value = modelName;
+                    input.disabled = false;
+                }
+            }
+
+            if (baseUrlInput) baseUrlInput.value = settings.base_url || '';
         }
     }
 
@@ -1014,12 +1036,17 @@ class KnowledgeManager {
                 }
             } else if (modelProvider === 'openai') {
                 // OpenAI 모델 선택시 - 기본값 사용
-                const modelSelect = document.getElementById('openaiEmbeddingModel');
-                const selectedModel = modelSelect?.value || 'text-embedding-3-small';
-                
+                const modelSelect = document.getElementById('openaiEmbeddingModelSelect');
+                const modelInput = document.getElementById('openaiEmbeddingModel');
+                const baseUrlInput = document.getElementById('openaiEmbeddingBaseUrl');
+
+                const selectedModel = modelInput?.value?.trim() || 'text-embedding-3-small';
+                const baseUrl = baseUrlInput?.value?.trim() || null;
+
                 settings = {
                     model: 'openai',
-                    openai_model: selectedModel
+                    openai_model: selectedModel,
+                    base_url: baseUrl,
                 };
             }
             
@@ -1168,11 +1195,13 @@ class KnowledgeManager {
     // OpenAI 임베딩 모델 테스트
     async testOpenaiEmbeddingModel() {
         const modelSelect = document.getElementById('openaiEmbeddingModel');
+        const baseUrlInput = document.getElementById('openaiEmbeddingBaseUrl');
         const testBtn = document.querySelector('.test-model-btn[data-action="test-openai-model"]');
         
         if (!modelSelect || !testBtn) return;
         
         const modelName = modelSelect.value;
+        const baseUrl = baseUrlInput?.value?.trim() || null;
         if (!modelName) {
             showNotification('모델을 선택해주세요.', 'warning');
             return;

@@ -60,17 +60,49 @@ async function loadUserSettings() {
             updateModelSelectionUI();
             updateCurrentModelInfo();
             
-            // Ollama 모델 목록 로드
-            if (selectedProvider === 'ollama') {
+            // OpenAI 설정 로드 또는 Ollama 모델 목록 로드
+            if (selectedProvider === 'gpt') {
+                const baseUrlInput = document.getElementById('openaiChatBaseUrl');
+                const modelNameInput = document.getElementById('openaiChatModelName');
+
+                if (baseUrlInput) baseUrlInput.value = currentUserSettings.openai_base_url || '';
+                if (modelNameInput) modelNameInput.value = currentUserSettings.openai_model || 'gpt-4o';
+            } else if (selectedProvider === 'ollama') {
                 await loadOllamaModels();
             }
         } else {
             console.error('❌ 설정 로딩 실패:', response.status);
             showNotification('설정을 불러오는데 실패했습니다.', 'error');
         }
+
+        // API 키 정보 로드
+        await loadApiKeyInfo();
+
     } catch (error) {
         console.error('❌ 설정 로딩 오류:', error);
         showNotification('설정 로딩 중 오류가 발생했습니다.', 'error');
+    }
+}
+
+async function loadApiKeyInfo() {
+    try {
+        const response = await fetchApi('/api/me');
+        if (response.ok) {
+            const user = await response.json();
+            if (user.api_key) {
+                const apiKeyInput = document.getElementById('apiKeyInput');
+                if (apiKeyInput) {
+                    // 마스킹된 키를 placeholder로 표시
+                    const maskedKey = `${user.api_key.substring(0, 8)}...${user.api_key.substring(user.api_key.length - 4)}`;
+                    apiKeyInput.placeholder = `현재 설정됨: ${maskedKey}`;
+                }
+            } else {
+                const apiKeyInput = document.getElementById('apiKeyInput');
+                apiKeyInput.placeholder = '예: sk-proj-... (현재 설정된 API 키가 없습니다)';
+            }
+        }
+    } catch (error) {
+        console.error('❌ API 키 정보 로드 오류:', error);
     }
 }
 
@@ -126,7 +158,8 @@ function updateCurrentModelInfo() {
     
     if (currentModelName) {
         if (selectedProvider === 'gpt') {
-            currentModelName.textContent = 'OpenAI GPT-4o';
+            const modelName = currentUserSettings?.openai_model || 'gpt-4o';
+            currentModelName.textContent = `OpenAI API (${modelName})`;
         } else if (selectedProvider === 'ollama' && currentUserSettings?.selected_ollama_model) {
             currentModelName.textContent = currentUserSettings.selected_ollama_model;
         } else {
@@ -472,6 +505,8 @@ export async function saveModelSettings() {
     console.log('💾 모델 설정 저장');
     
     let selectedModel = null;
+    let openaiBaseUrl = null;
+    let openaiModelName = null;
     
     if (selectedProvider === 'ollama') {
         const installedSelect = document.getElementById('installedModelSelect');
@@ -480,6 +515,14 @@ export async function saveModelSettings() {
             showNotification('Ollama 모델을 선택해주세요.', 'error');
             return;
         }
+    }
+    else if (selectedProvider === 'gpt') {
+        // OpenAI API 서버 설정 get
+        const baseUrlInput = document.getElementById('openaiChatBaseUrl');
+        const modelNameInput = document.getElementById('openaiChatModelName');
+
+        openaiBaseUrl = baseUrlInput?.value?.trim() || null;
+        openaiModelName = modelNameInput?.value?.trim() || 'gpt-4o';
     }
     
     const saveBtn = document.querySelector('.save-btn');
@@ -493,7 +536,9 @@ export async function saveModelSettings() {
             method: 'POST',
             body: JSON.stringify({
                 selected_model_provider: selectedProvider,
-                selected_ollama_model: selectedProvider === 'ollama' ? selectedModel : null
+                selected_ollama_model: selectedProvider === 'ollama' ? selectedModel : null,
+                openai_base_url: selectedProvider === 'gpt' ? openaiBaseUrl : null,
+                openai_model: selectedProvider === 'gpt' ? openaiModelName : null,
             })
         });
 
@@ -504,7 +549,9 @@ export async function saveModelSettings() {
             // 현재 설정 업데이트
             currentUserSettings = {
                 selected_model_provider: data.selected_model_provider,
-                selected_ollama_model: data.selected_ollama_model
+                selected_ollama_model: data.selected_ollama_model,
+                openai_base_url: data.openai_base_url,
+                openai_model: data.openai_model,
             };
             
             showNotification('설정이 저장되었습니다.', 'success');
@@ -524,6 +571,43 @@ export async function saveModelSettings() {
         }
     }
 }
+
+// // 모델 설정 로드
+// export async function loadModelSettings() {
+//     try {
+//         const response = await fetchApi('/api/settings', {
+//             method: 'GET'
+//         });
+
+//         if (response.ok) {
+//             const settings = await response.json();
+//             console.log('✅ 설정 로드 완료:', settings);
+
+//             currentUserSettings = settings;
+
+//             if (settings.selected_model_provider === 'gpt') {
+//                 const baseUrlInput = document.getElementById('openaiChatBaseUrl');
+//                 const modelNameInput = document.getElementById('openaiChatModelName');
+
+//                 if (baseUrlInput) baseUrlInput.value = settings.openai_base_url || '';
+//                 if (modelNameInput) modelNameInput.value = settings.openai_model || 'gpt-4o';
+//             }
+//             else if (settings.selected_model_provider === 'ollama') {
+//                 const ollamaSelect = document.getElementById('ollamaModel');
+//                 if (ollamaSelect) ollamaSelect.value = settings.selected_ollama_model;
+//             }
+
+//             // 모델 제공자 선택
+//             if (settings.selected_model_provider === 'gpt') {
+//                 document.getElementById('gptProvider')?.click();
+//             } else if (settings.selected_model_provider === 'ollama') {
+//                 document.getElementById('ollamaProvider')?.click();
+//             }
+//         }
+//     } catch (error) {
+//         console.error('❌ 설정 로드 실패:', error);
+//     }
+// }
 
 // 모델 다운로드 중단 함수
 export function cancelModelDownload() {

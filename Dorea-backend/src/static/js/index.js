@@ -748,6 +748,25 @@ function updateNavTabs(activeView) {
     }
 }
 
+// 임베딩 모델 선택에 따라 입력칸 업데이트 및 직접입력 선택시 입력칸 활성화
+function toggleCustomEmbeddingModel() {
+    const select = document.getElementById('openaiEmbeddingModelSelect');
+    const input = document.getElementById('openaiEmbeddingModel');
+
+    if (!select || !input) return;
+
+    if (select.value === 'custom') {
+        // 직접입력 선택 input 활성화 및 비우기
+        input.disabled = false;
+        input.value = '';
+        input.focus();
+    } else {
+        // 다른 옵션 선택 select 값을 input에 복사하고 비활성화
+        input.disabled = true;
+        input.value = select.value;
+    }
+}
+
 
 // HTML onclick에서 접근할 수 있도록 모든 필요한 함수를 글로벌에 노출
 window.logout = Utils.logout;
@@ -845,3 +864,5 @@ window.saveApiKey = saveApiKey;
 window.logout = logout;
 window.selectGptProvider = selectGptProvider;
 window.toggleAdvancedOptions = toggleAdvancedOptions;
+
+window.toggleCustomEmbeddingModel = toggleCustomEmbeddingModel;

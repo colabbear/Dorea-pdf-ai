@@ -17,10 +17,12 @@ class EmbeddingSettingsRequest(BaseModel):
     model: str  # 'ollama' or 'openai'
     ollama_model: Optional[str] = None
     openai_model: Optional[str] = None
+    base_url: Optional[str] = None
 
 class EmbeddingSettingsResponse(BaseModel):
     provider: str
     model_name: str
+    base_url: Optional[str] = None
     updated_at: str
 
 class EmbeddingTestRequest(BaseModel):
@@ -94,7 +96,7 @@ async def save_embedding_settings(
         
         # 설정 저장
         success = await knowledge_manager.save_user_settings(
-            user_id, request.model, model_name
+            user_id, request.model, model_name, request.base_url
         )
         
         if success:
@@ -127,6 +129,7 @@ async def get_embedding_settings(
             return {
                 "provider": settings['provider'],
                 "model_name": settings['model_name'],
+                "base_url": settings['base_url'],
                 "updated_at": settings['updated_at'].isoformat(),
                 "configured": True
             }
@@ -134,6 +137,7 @@ async def get_embedding_settings(
             return {
                 "provider": None,
                 "model_name": None,
+                "base_url": None,
                 "updated_at": None,
                 "configured": False
             }
@@ -154,7 +158,7 @@ async def test_embedding_model(
     try:
         user_id = current_user.id
         success, message = await knowledge_manager.test_embedding_model(
-            request.provider, request.model, user_id
+            request.provider, request.model, user_id, request.base_url
         )
         
         return EmbeddingTestResponse(

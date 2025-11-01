@@ -506,14 +506,40 @@
                                 🚀 OpenAI 임베딩 모델
                             </label>
                             <div class="model-input-group">
-                                <select id="openaiEmbeddingModel" class="model-select">
+                                <select id="openaiEmbeddingModelSelect" class="model-select" onchange="window.toggleCustomEmbeddingModel()">
                                     <option value="text-embedding-3-small">text-embedding-3-small (권장)</option>
                                     <option value="text-embedding-3-large">text-embedding-3-large (고성능)</option>
                                     <option value="text-embedding-ada-002">text-embedding-ada-002 (레거시)</option>
+                                    <option value="custom">직접 입력 (커스텀 엔드포인트 사용시)</option>
                                 </select>
+
+                                <input
+                                    type="text"
+                                    id="openaiEmbeddingModel"
+                                    class="model-select"
+                                    placeholder="모델 이름 입력 (예: nomic-embed-text)"
+                                    style="width: 100%;"
+                                >
+
+                                <div class="setting-help">
+                                    API 키는 메인 설정(우측 상단 톱니바퀴)에서 관리됩니다.
+                                </div>
                             </div>
-                            <div class="setting-help">
-                                API 키는 메인 설정(우측 상단 톱니바퀴)에서 관리됩니다.
+                            <br>
+                            <label for="openaiEmbeddingBaseUrl" class="setting-label">
+                                    🌐 커스텀 엔드포인트 (선택사항)
+                            </label>
+                            <div class="model-input-group" style="margin-top: 12px;">
+                                <input
+                                    type="text"
+                                    id="openaiEmbeddingBaseUrl"
+                                    class="model-select"
+                                    placeholder="예: http://localhost:8000/v1"
+                                    style="width: 100%;"
+                                >
+                                <div class="setting-help">
+                                    OpenAI 호환 서버(vLLM 등) 사용 시 입력하세요.
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -554,8 +580,9 @@
                             <div class="flex items-center">
                                 <div class="w-4 h-4 border-2 border-gray-300 rounded-full mr-3" id="gptRadio"></div>
                                 <div>
-                                    <div class="font-medium text-sm">GPT API</div>
-                                    <div class="text-xs text-gray-500">OpenAI 클라우드 모델</div>
+                                    <div class="font-medium text-sm">OpenAI API</div>
+                                    <div class="text-xs text-gray-500">OpenAI 클라우드</div>
+                                    <div class="text-xs text-gray-500">OpenAI API 호환 서버</div>
                                 </div>
                             </div>
                         </div>
@@ -613,12 +640,42 @@
                             </div>
                             <div id="apiKeyStatus" class="api-status hidden"></div>
                         </div>
+                        
+                        <div class="api-form-group" style="margin-top: 16px;">
+                            <label class="api-form-label">커스텀 엔드포인트 (선택사항)</label>
+                            <input
+                                type="text"
+                                id="openaiChatBaseUrl"
+                                class="api-input-field"
+                                placeholder="예: http://localhost:8000/v1"
+                            >
+                            <div class="api-help-text">
+                                <span>🌐</span>
+                                <span>OpenAI 호환 서버 사용 시 입력하세요</span>
+                            </div>
+                        </div>
+                          
+                        <!-- 모델 이름 설정 -->
+                        <div class="api-form-group" style="margin-top: 16px;">
+                            <label class="api-form-label">모델 이름</label>
+                            <input
+                                type="text"
+                                id="openaiChatModelName"
+                                class="api-input-field"
+                                placeholder="gpt-4o"
+                            >
+                            <div class="api-help-text">
+                                <span>🤖</span>
+                                <span>사용할 모델 이름 (예: gpt-4o, gpt-4-turbo)</span>
+                            </div>
+                        </div>
+                    
                     </div>
                     
                     <div class="api-info-section">
                         <h4 class="api-info-title">
                             <span>💡</span>
-                            사용 안내
+                            OpenAI 클라우드 모델 사용 안내
                         </h4>
                         <ul class="api-info-list">
                             <li class="api-info-item">OpenAI 계정에서 API 키를 발급받으세요</li>

@@ -2619,6 +2619,25 @@ body #uploadModal .upload-actions {
 }
 
 /* ===================================
+   Settings Modal Body 스크롤 개선
+   =================================== */
+
+/* 설정 모달 전용 바디 스타일 */
+body #settingsModal .modal-body {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    max-height: calc(85vh - 100px) !important;
+    padding: 24px !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* 설정 모달 컨텐츠 높이 조정 */
+#settingsModal .model-management-modal {
+    max-height: 90vh !important;
+}
+
+/* ===================================
    Settings Modal Styles (Updated)
    =================================== */
 

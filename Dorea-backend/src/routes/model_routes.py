@@ -87,7 +87,9 @@ async def get_user_settings(
             settings = UserSettings(
                 user_id=current_user.id,
                 selected_model_provider="gpt",
-                selected_ollama_model=None
+                selected_ollama_model=None,
+                openai_base_url=None,
+                openai_model="gpt-4o",
             )
             db.add(settings)
             db.commit()
@@ -96,6 +98,8 @@ async def get_user_settings(
         return {
             "selected_model_provider": settings.selected_model_provider,
             "selected_ollama_model": settings.selected_ollama_model,
+            "openai_base_url": settings.openai_base_url,
+            "openai_model": settings.openai_model or "gpt-4o",
             "updated_at": settings.updated_at.isoformat() if settings.updated_at else None
         }
         
@@ -114,6 +118,8 @@ async def update_user_settings(
         # 요청 데이터 검증
         model_provider = request.get("selected_model_provider", "gpt")
         ollama_model = request.get("selected_ollama_model")
+        openai_base_url = request.get("openai_base_url")
+        openai_model = request.get("openai_model", "gpt-4o")
         
         if model_provider not in ["gpt", "ollama"]:
             raise HTTPException(status_code=400, detail="모델 제공자는 'gpt' 또는 'ollama'여야 합니다")
@@ -130,13 +136,17 @@ async def update_user_settings(
             # 기존 설정 업데이트
             settings.selected_model_provider = model_provider
             settings.selected_ollama_model = ollama_model if model_provider == "ollama" else None
+            settings.openai_base_url = openai_base_url
+            settings.openai_model = openai_model
             settings.updated_at = func.now()
         else:
             # 새 설정 생성
             settings = UserSettings(
                 user_id=current_user.id,
                 selected_model_provider=model_provider,
-                selected_ollama_model=ollama_model if model_provider == "ollama" else None
+                selected_ollama_model=ollama_model if model_provider == "ollama" else None,
+                openai_base_url=None,
+                openai_model="gpt-4o",
             )
             db.add(settings)
         
@@ -146,7 +156,9 @@ async def update_user_settings(
         return {
             "message": "설정이 저장되었습니다",
             "selected_model_provider": settings.selected_model_provider,
-            "selected_ollama_model": settings.selected_ollama_model
+            "selected_ollama_model": settings.selected_ollama_model,
+            "openai_base_url": settings.openai_base_url,
+            "openai_model": settings.openai_model,
         }
         
     except HTTPException:

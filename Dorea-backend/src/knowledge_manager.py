@@ -47,6 +47,7 @@ class KnowledgeManager:
             return {
                 'provider': settings.provider,
                 'model_name': settings.model_name,
+                'base_url' : settings.base_url,
                 'updated_at': settings.updated_at
             }
         return None
@@ -61,7 +62,17 @@ class KnowledgeManager:
             return user.api_key
         return None
     
-    async def save_user_settings(self, user_id: int, provider: str, model_name: str) -> bool:
+    async def _get_user_openai_url(self, user_id: int) -> Optional[str]:
+        """사용자의 External API url 조회"""
+        if not user_id:
+            return None
+            
+        user = self.db.query(User).filter_by(id=user_id).first()
+        if user and user.base_url:
+            return user.base_url
+        return None
+    
+    async def save_user_settings(self, user_id: int, provider: str, model_name: str, base_url: Optional[str] = None) -> bool:
         """사용자 임베딩 설정 저장"""
         try:
             settings = self.db.query(EmbeddingSettings).filter_by(user_id=user_id).first()
@@ -69,12 +80,14 @@ class KnowledgeManager:
             if settings:
                 settings.provider = provider
                 settings.model_name = model_name
+                settings.base_url = base_url
                 settings.updated_at = datetime.utcnow()
             else:
                 settings = EmbeddingSettings(
                     user_id=user_id,
                     provider=provider,
-                    model_name=model_name
+                    model_name=model_name,
+                    base_url=base_url
                 )
                 self.db.add(settings)
             
@@ -131,8 +144,11 @@ class KnowledgeManager:
             api_key = await self._get_user_openai_key(user_id)
             if not api_key:
                 return False, "OpenAI API 키가 설정되지 않았습니다. 시스템 설정에서 OpenAI API 키를 입력해주세요."
-            
-            client = openai.AsyncOpenAI(api_key=api_key)
+
+            # 사용자 DB에서 OpenAI 호환 서버 base url 가져오기
+            base_url = self._get_user_openai_url(user_id)
+
+            client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
             response = await client.embeddings.create(
                 model=model_name,
                 input=text
@@ -501,8 +517,10 @@ class KnowledgeManager:
         try:
             api_key = await self._get_user_openai_key(user_id)
             if not api_key: raise ValueError("OpenAI API 키가 설정되지 않았습니다")
+
+            base_url = await self._get_user_openai_url(user_id)
             
-            client = openai.AsyncOpenAI(api_key=api_key)
+            client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
             response = await client.embeddings.create(model=model_name, input=texts)
             return [data.embedding for data in response.data]
         except Exception as e:

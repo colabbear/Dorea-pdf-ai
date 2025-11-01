@@ -72,8 +72,13 @@ async def get_api_key_hash(api_key: str = Depends(get_current_api_key)) -> str:
     """API 키를 해시로 변환하여 반환 (기존 시스템 호환성)"""
     return hash_api_key(api_key)
 
-def create_openai_client(api_key: str) -> OpenAI:
+def create_openai_client(api_key: str, base_url: Optional[str] = None) -> OpenAI:
     """OpenAI 클라이언트 생성"""
+
+    # OpenAI compatible server 지원
+    if base_url:
+        return OpenAI(api_key=api_key, base_url=base_url)
+
     return OpenAI(api_key=api_key)
 
 # JWT 설정
