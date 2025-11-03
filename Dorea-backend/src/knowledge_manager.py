@@ -67,9 +67,9 @@ class KnowledgeManager:
         if not user_id:
             return None
             
-        user = self.db.query(User).filter_by(id=user_id).first()
-        if user and user.base_url:
-            return user.base_url
+        settings = self.db.query(EmbeddingSettings).filter_by(user_id=user_id).first()
+        if settings and settings.base_url:
+            return settings.base_url
         return None
     
     async def save_user_settings(self, user_id: int, provider: str, model_name: str, base_url: Optional[str] = None) -> bool:
