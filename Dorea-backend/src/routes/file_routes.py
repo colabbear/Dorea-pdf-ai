@@ -119,7 +119,7 @@ def check_pdf_has_text(file_path: str) -> dict:
 def convert_docling_to_segments(docling_json: dict) -> list:
     """Docling JSON을 HURIDOCS segments.json 형식으로 변환"""
     segments = []
-
+    
     # 페이지 높이 정보 추출 (coord_origin 변환에 필요)
     try:
         page_heights = {}
@@ -142,9 +142,9 @@ def convert_docling_to_segments(docling_json: dict) -> list:
             coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
             page_no = prov.get('page_no', 1)
             page_height = page_heights.get(page_no, 841.9199829101562)
-
+            
             converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
-
+            
             segment = {
                 'id': text_item.get('self_ref', '').replace('#/', ''), # 디버그용
                 'type': map_docling_label_to_segment_type(text_item.get('label')),
@@ -165,9 +165,9 @@ def convert_docling_to_segments(docling_json: dict) -> list:
             coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
             page_no = prov.get('page_no', 1)
             page_height = page_heights.get(page_no, 841.9199829101562)
-
+            
             converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
-
+            
             # # children에서 캡션 텍스트 추출 (있는 경우)
             caption_text = ''
             # for child_ref in picture_item.get('children', []):
@@ -176,7 +176,7 @@ def convert_docling_to_segments(docling_json: dict) -> list:
             #     for text in docling_json.get('texts', []):
             #         if text.get('self_ref', '').replace('#/', '') == child_id:
             #             caption_text += text.get('text', '') + ' '
-
+            
             segment = {
                 'id': picture_item.get('self_ref', '').replace('#/', ''), # 디버그용
                 'type': 'Picture',
@@ -197,12 +197,12 @@ def convert_docling_to_segments(docling_json: dict) -> list:
             coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
             page_no = prov.get('page_no', 1)
             page_height = page_heights.get(page_no, 841.9199829101562)
-
+            
             converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
-
+            
             # 테이블 텍스트 추출
             table_text = extract_table_text(table_item)
-
+            
             segment = {
                 'id': table_item.get('self_ref', '').replace('#/', ''), # 디버그용
                 'type': 'Table',
@@ -220,13 +220,13 @@ def convert_docling_to_segments(docling_json: dict) -> list:
     # groups 처리 향후 예정
     # for group_item in docling_json.get('groups', []):
     #     pass
-
+    
     return segments
-
+  
 def convert_bbox_coordinates(bbox: dict, coord_origin: str, page_height: float) -> dict:
     """
     Docling 좌표계를 HURIDOCS 좌표계로 변환
-
+    
     Docling: BOTTOMLEFT 원점 (왼쪽 하단이 (0,0))
     HURIDOCS: TOPLEFT 원점 (왼쪽 상단이 (0,0))
     """
@@ -234,12 +234,12 @@ def convert_bbox_coordinates(bbox: dict, coord_origin: str, page_height: float) 
     r = bbox.get('r', 0)
     t = bbox.get('t', 0)
     b = bbox.get('b', 0)
-
+    
     if coord_origin == 'BOTTOMLEFT':
         # BOTTOMLEFT → TOPLEFT 변환
         new_top = page_height - t
         new_bottom = page_height - b
-
+        
         return {
             'left': l,
             'top': new_top,
@@ -286,11 +286,11 @@ def extract_table_text(table_item: dict) -> str:
     data.grid 구조를 평문으로 변환
     """
     text_parts = []
-
+    
     # data.grid가 있는 경우
     table_data = table_item.get('data', {})
     grid = table_data.get('grid', [])
-
+    
     if grid:
         for row in grid:
             row_texts = []
@@ -305,6 +305,177 @@ def extract_table_text(table_item: dict) -> str:
     
     # grid가 없으면 text 필드 사용
     return table_item.get('orig', table_item.get('text', ''))
+
+
+#===========================================
+# docling chunk json -> huridocs segments 변환 함수
+#===========================================
+
+def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
+    """
+    Docling chunk JSON을 HURIDOCS segments.json 형식으로 변환
+    복합 segment들로 구성됨 segment에 is_compound, bounding_boxes 필드 추가
+    각 청크의 text 내용 출처의 페이지 번호와 bbox들이 bounding_boxes에 배열로 저장됨
+    """
+    segments = []
+
+    # "include_converted_doc": True 로 해서 /v1/chunk/hybrid/file/async 요청하면 docling json 얻을 수 있음
+    docling_json = docling_chunk_json.get('documents', [{}])[0].get('content', {}).get('json_content', {})
+
+    print("docling_json 추출")
+
+    # 페이지 높이 정보 추출 (coord_origin 변환에 필요)
+    try:
+        page_heights = {}
+        for page_no, page_data in docling_json.get('pages', {}).items():
+            page_heights[int(page_no)] = page_data.get('size', {}).get('height', 841.9199829101562)
+    except Exception as e:
+        print(f"❌ 페이지 높이 정보 추출 실패: {e}")
+        raise Exception(f"❌ Docling JSON 변환 실패: 페이지 높이 정보 추출 실패 - {e}")
+
+
+    # 각 text_time 의 prov 가 여러개일 수 도 있음
+    # texts 배열 self_ref에 대해 bbox 정리
+    texts_bboxes = {}
+    for text_item in docling_json.get('texts', []):
+        text_self_ref = text_item.get('self_ref', 'Unknown')
+        texts_bboxes[text_self_ref] = []
+        for prov in text_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            texts_bboxes[text_self_ref].append(
+                {
+                    'page_number': page_no,
+                    'left': converted_bbox['left'],
+                    'top': converted_bbox['top'],
+                    'width': converted_bbox['width'],
+                    'height': converted_bbox['height'],
+                }
+            )
+
+
+    # tables 배열 self_ref에 대해 bbox 정리
+    tables_bboxes = {}
+    for table_item in docling_json.get('tables', []):
+        table_self_ref = table_item.get('self_ref', 'Unknown')
+        tables_bboxes[table_self_ref] = []
+        for prov in table_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            tables_bboxes[table_self_ref].append(
+                {
+                    'page_number': page_no,
+                    'left': converted_bbox['left'],
+                    'top': converted_bbox['top'],
+                    'width': converted_bbox['width'],
+                    'height': converted_bbox['height'],
+                }
+            )
+
+    # chunks 배열 처리
+    for chunk in docling_chunk_json.get('chunks', []):
+        segment = {
+                'chunk_index': chunk.get('chunk_index', ''), # 디버그용
+                'num_tokens': chunk.get('num_tokens', ''), # 디버그용
+                'page_numbers': chunk.get('page_numbers', []), # 디버그용
+                'type': 'Text',
+                'text': chunk.get('text', ''), # 청크 content
+                'confidence': 1.0,
+                'bounding_boxes': [],
+        }
+        for doc_item in chunk.get('doc_items', []):
+            if "text" in doc_item:
+                doc_item_bboxes = texts_bboxes.get(
+                    doc_item,
+                    [
+                        {
+                            'page_number': 1,
+                            'left': 0,
+                            'top': 0,
+                            'width': 0,
+                            'height': 0,
+                        },
+                    ]
+                )
+                for doc_item_bbox in doc_item_bboxes:
+                    segment['bounding_boxes'].append(doc_item_bbox)
+            elif "table" in doc_item:
+                doc_item_bboxes = tables_bboxes.get(
+                    doc_item,
+                    [
+                        {
+                            'page_number': 1,
+                            'left': 0,
+                            'top': 0,
+                            'width': 0,
+                            'height': 0,
+                        },
+                    ]
+                )
+                for doc_item_bbox in doc_item_bboxes:
+                    segment['bounding_boxes'].append(doc_item_bbox)
+
+        print("chunk 처리 완료")
+        # 청크 멤버의 첫 bbox로 설정 단일 bbox인 segment 처리와 호환성을 위해
+        segment['page_number'] = segment['bounding_boxes'][0]['page_number']
+        segment['left'] = segment['bounding_boxes'][0]['left']
+        segment['top'] = segment['bounding_boxes'][0]['top']
+        segment['width'] = segment['bounding_boxes'][0]['width']
+        segment['height'] = segment['bounding_boxes'][0]['height']
+
+        if len(segment['bounding_boxes']) > 1:
+            segment['is_compound'] = True
+        else:
+            segment['is_compound'] = False
+
+        segments.append(segment)
+    
+	
+
+    # pictures 배열은 그대로 처리 (chunk에 포함되지 않는다고 함)
+    for picture_item in docling_json.get('pictures', []):
+        for prov in picture_item.get('prov', []):
+            bbox = prov.get('bbox', {})
+            coord_origin = prov.get('coord_origin', 'BOTTOMLEFT')
+            page_no = prov.get('page_no', 1)
+            page_height = page_heights.get(page_no, 841.9199829101562)
+
+            converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
+
+            # # children에서 캡션 텍스트 추출 (있는 경우)
+            caption_text = ''
+            # for child_ref in picture_item.get('children', []):
+            #     child_id = child_ref.get('$ref', '').replace('#/', '')
+            #     # texts 배열에서 해당 child 찾기
+            #     for text in docling_json.get('texts', []):
+            #         if text.get('self_ref', '').replace('#/', '') == child_id:
+            #             caption_text += text.get('text', '') + ' '
+
+            segment = {
+                'id': picture_item.get('self_ref', '').replace('#/', ''), # 디버그용
+                'type': 'Picture',
+                'text': caption_text.strip(),  # 캡션이 있으면 포함
+                'page_number': page_no,
+                'left': converted_bbox['left'],
+                'top': converted_bbox['top'],
+                'width': converted_bbox['width'],
+                'height': converted_bbox['height'],
+                'confidence': 1.0
+            }
+            segments.append(segment)
+
+
+    return segments
 
 # ==========================================
 # 백그라운드 처리 함수
@@ -352,7 +523,13 @@ async def process_pdf_file(file_id: str):
                     "ocr_engine": "easyocr",
                     "ocr_lang": ["en", "ko"], # 일단 en, ko 로 고정 # [db_file.language] if db_file.language else ["en", "ko"],
                     "pdf_backend": "dlparse_v4",
-                    "target_type": "inbody"
+                    "target_type": "inbody",
+                }
+                data2 = {
+                    "include_converted_doc": True,
+                    "convert_do_ocr": True,
+                    "convert_ocr_engine": "easyocr",
+                    "convert_ocr_lang": ["en", "ko"],
                 }
 
                 task_response = await client.post(
@@ -360,13 +537,23 @@ async def process_pdf_file(file_id: str):
                     files=files,
                     data=data
                 )
+                task_response2 = await client.post(
+                    f"{DOCKER_API_URL}/v1/chunk/hybrid/file/async",
+                    files=files,
+                    data=data2
+                )
             
             if task_response.status_code != 200:
                 raise Exception(f"작업 제출 실패: {task_response.status_code}")
+            if task_response2.status_code != 200:
+                raise Exception(f"chunk 작업 제출 실패: {task_response2.status_code}")
             
             task_data = task_response.json()
             task_id = task_data["task_id"]
 
+            task_data2 = task_response2.json()
+            task_id2 = task_data2["task_id"]
+            
             # 2. 작업 완료 대기 (폴링)
             while True:
                 status_response = await client.get(
@@ -380,11 +567,44 @@ async def process_pdf_file(file_id: str):
                     raise Exception("문서 변환 실패")
                 
                 await asyncio.sleep(5)
+
+            while True:
+                status_response2 = await client.get(
+                    f"{DOCKER_API_URL}/v1/status/poll/{task_id2}"
+                )
+                status = status_response2.json()
+                
+                if status["task_status"] == "success":
+                    break
+                elif status["task_status"] == "failure":
+                    raise Exception("chunk 문서 변환 실패")
+                
+                await asyncio.sleep(5)
+
+
             
             # 3. 결과 가져오기
             result_response = await client.get(
                 f"{DOCKER_API_URL}/v1/result/{task_id}"
             )
+            
+            result_response2 = await client.get(
+                f"{DOCKER_API_URL}/v1/result/{task_id2}"
+            )
+
+            if result_response2.status_code == 200:
+                result2 = result_response2.json()
+                segments_data2 = convert_docling_chunk_to_segments(result2)
+
+                file_stem = Path(db_file.filename).stem
+                segments_path = file_dir / f"segments_chunk_{file_stem}.json"
+                with open(segments_path, "w", encoding="utf-8") as f:
+                    json.dump(segments_data2, f, ensure_ascii=False, indent=2)
+
+                # 원본 chunk Docling JSON 저장 (디버깅용)  
+                docling_path = file_dir / f"docling_chunk_{file_stem}.json"
+                with open(docling_path, "w", encoding="utf-8") as f:
+                    json.dump(result2, f, ensure_ascii=False, indent=2)
 
             if result_response.status_code == 200:
                 result = result_response.json()
@@ -396,15 +616,15 @@ async def process_pdf_file(file_id: str):
                 with open(segments_path, "w", encoding="utf-8") as f:
                     json.dump(segments_data, f, ensure_ascii=False, indent=2)
 
-                # 원본 Docling JSON도 보관 (디버깅용)
-                docling_path = file_dir / f"docling_{file_stem}.json"
-                with open(docling_path, "w", encoding="utf-8") as f:
+                # 원본 Docling JSON도 보관 (디버깅용)  
+                docling_path = file_dir / f"docling_{file_stem}.json"  
+                with open(docling_path, "w", encoding="utf-8") as f:  
                     json.dump(result, f, ensure_ascii=False, indent=2)
                 
                 print(f"✅ [File ID: {file_id}] 세그먼트 추출 완료: {len(segments_data)}개")
                 db_file.status = "completed"
                 db_file.processed_at = func.now()
-                db_file.segments_data = segments_data
+                db_file.segments_data = segments_data2
                 db.commit()
                 
                 # 채팅 세션 생성

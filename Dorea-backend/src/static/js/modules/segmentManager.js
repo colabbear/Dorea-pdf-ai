@@ -7,7 +7,7 @@ import { showNotification } from './utils.js';
 // 세그먼트 관리 변수
 let segments = [];
 let selectedSegments = [];
-let maxSegments = 4;
+let maxSegments = 999; // 사실상 무제한
 let selectedSegmentIds = []; // 선택된 세그먼트 ID 저장
 let isImageModeActive = false; // 이미지 모드 상태
 
@@ -45,12 +45,21 @@ function updateSegmentOverlayById(overlayId, viewport, pageNum) {
     // 이전 세그먼트들 제거 (줌 변경시 위치 재계산을 위해)
     overlay.innerHTML = '';
 
-    const pageSegments = segments.filter(s => s.page_number === pageNum);
+    const pageSegments = segments.filter(s => {
+        // 복합 bbox 처리
+        if (s.is_compound && s.page_numbers) {
+            return s.page_numbers.includes(pageNum);
+        }
+        // 기존 처리
+        return s.page_number === pageNum
+    });
 
     pageSegments.forEach((segment, index) => {
-        const segmentEl = createSegmentElement(segment, index, pageNum, viewport);
+        const result = createSegmentElement(segment, index, pageNum, viewport);
         
+        if (!Array.isArray(result)) {
         // 이전에 선택된 세그먼트인지 확인하고 선택 상태 복원
+        const segmentEl = result;
         const segmentId = segment.id || `page${pageNum}_${index}`;
         if (selectedSegmentIds.includes(segmentId)) {
             if (selectedSegmentIds.length === 1) {
@@ -68,11 +77,43 @@ function updateSegmentOverlayById(overlayId, viewport, pageNum) {
         }
         
         overlay.appendChild(segmentEl);
+        } else {
+            // 복합 bbox: 배열의 모든 요소 추가
+            const segmentId = result[0].dataset.segmentId;  
+              
+            result.forEach(segmentEl => {  
+                // 선택 상태 복원  
+                if (selectedSegmentIds.includes(segmentId)) {  
+                    if (selectedSegmentIds.length === 1) {  
+                        segmentEl.classList.add('selected');  
+                    } else {  
+                        segmentEl.classList.add('multi-selected');  
+                    }  
+                }  
+                overlay.appendChild(segmentEl);  
+            });  
+              
+            // selectedSegments 배열 업데이트 (첫 번째 요소만 저장)  
+            if (selectedSegmentIds.includes(segmentId)) {  
+                const existingIndex = selectedSegments.findIndex(s =>   
+                    (s.id && s.id === segmentId) ||   
+                    (s.element && s.element.dataset.segmentId === segmentId)  
+                );  
+                if (existingIndex === -1) {  
+                    selectedSegments.push({ ...segment, element: result[0] });  
+                } else {  
+                    selectedSegments[existingIndex].element = result[0];  
+                }  
+            }
+        }
     });
 }
 
 // 세그먼트 요소 생성 헬퍼 함수
 function createSegmentElement(segment, index, pageNum, viewport) {
+
+    // 복합 bbox가 아닌 경우: 기존 로직 사용
+    if (!segment.is_compound || !segment.bounding_boxes) {
     const segmentEl = document.createElement('div');
     segmentEl.className = 'segment';
     segmentEl.dataset.segmentIndex = index;
@@ -124,6 +165,65 @@ function createSegmentElement(segment, index, pageNum, viewport) {
     });
 
     return segmentEl;
+    } else {
+    // 복합 bbox인 경우: 배열 반환  
+    const elements = [];  
+    const bboxes = segment.bounding_boxes;  
+      
+    // 현재 페이지의 bbox만 필터링  
+    const pageBboxes = bboxes.filter(bbox => bbox.page_number === pageNum);  
+      
+    // 통일된 segment ID 생성  
+    const unifiedSegmentId = `page${segment.chunk_index}`;
+      
+    pageBboxes.forEach((bbox, bboxIndex) => {  
+        const segmentEl = document.createElement('div');  
+        segmentEl.className = 'segment';  
+        segmentEl.dataset.segmentId = unifiedSegmentId;  
+        segmentEl.dataset.bboxIndex = bboxIndex;  
+          
+        // bbox 좌표로 변환 (기존 로직 재사용)  
+        const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;  
+        const calculatedLeft = bbox.left * scaleX + offsetX;  
+          
+        let calculatedTop;  
+        if (scaleY < 0) {  
+            calculatedTop = (bbox.top + bbox.height) * scaleY + offsetY;  
+        } else {  
+            calculatedTop = bbox.top * scaleY + offsetY;  
+        }  
+          
+        const flippedTop = viewport.height - calculatedTop - (bbox.height * Math.abs(scaleY));  
+          
+        segmentEl.style.left = calculatedLeft + 'px';  
+        segmentEl.style.top = flippedTop + 'px';  
+        segmentEl.style.width = (bbox.width * Math.abs(scaleX)) + 'px';  
+        segmentEl.style.height = (bbox.height * Math.abs(scaleY)) + 'px';  
+  
+        const typeColors = {  
+            'Text': 'rgba(59, 130, 246, 0.3)',  
+            'Picture': 'rgba(16, 185, 129, 0.3)',  
+            'Figure': 'rgba(16, 185, 129, 0.3)',  
+            'Table': 'rgba(245, 158, 11, 0.3)',  
+            'Title': 'rgba(190, 24, 93, 0.3)',  
+            'Caption': 'rgba(124, 58, 237, 0.3)'  
+        };  
+  
+        segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';  
+          
+        segmentEl.addEventListener('click', (e) => {  
+            e.stopPropagation();  
+            handleSegmentClick(e, segment, segmentEl);  
+        });  
+          
+        elements.push(segmentEl);  
+    });  
+      
+    return elements; // 배열 반환  
+    
+    }
+
+
 }
 
 // 세그먼트 오버레이 업데이트 (단일 페이지 모드용)
@@ -136,12 +236,22 @@ function updateSegmentOverlay(viewport, pageNum) {
     // 이전 세그먼트들 제거 (줌 변경시 위치 재계산을 위해)
     overlay.innerHTML = '';
 
-    const pageSegments = segments.filter(s => s.page_number === pageNum);
+    const pageSegments = segments.filter(s => {
+        // 복합 bbox 처리
+        if (s.is_compound && s.page_numbers) {
+            return s.page_numbers.includes(pageNum);
+        }
+        // 기존 처리
+        return s.page_number === pageNum
+    });
+
 
     pageSegments.forEach((segment, index) => {
-        const segmentEl = createSegmentElement(segment, index, pageNum, viewport);
+        const result = createSegmentElement(segment, index, pageNum, viewport);
         
+        if (!Array.isArray(result)) {
         // 이전에 선택된 세그먼트인지 확인하고 선택 상태 복원
+        const segmentEl = result
         const segmentId = segment.id || `page${pageNum}_${index}`;
         if (selectedSegmentIds.includes(segmentId)) {
             if (selectedSegmentIds.length === 1) {
@@ -159,12 +269,50 @@ function updateSegmentOverlay(viewport, pageNum) {
         }
         
         overlay.appendChild(segmentEl);
+        } else {
+            // 복합 bbox: 배열의 모든 요소 추가
+    const segmentId = result[0].dataset.segmentId;  
+      
+    result.forEach(segmentEl => {  
+        // 선택 상태 복원  
+        if (selectedSegmentIds.includes(segmentId)) {  
+            if (selectedSegmentIds.length === 1) {  
+                segmentEl.classList.add('selected');  
+            } else {  
+                segmentEl.classList.add('multi-selected');  
+            }  
+        }  
+        overlay.appendChild(segmentEl);  
+    });  
+      
+    // selectedSegments 배열 업데이트 (첫 번째 요소만 저장)  
+    if (selectedSegmentIds.includes(segmentId)) {  
+        const existingIndex = selectedSegments.findIndex(s =>   
+            (s.id && s.id === segmentId) ||   
+            (s.element && s.element.dataset.segmentId === segmentId)  
+        );  
+        if (existingIndex === -1) {  
+            selectedSegments.push({ ...segment, element: result[0] });  
+        } else {  
+            selectedSegments[existingIndex].element = result[0];  
+        }  
+    }
+        }
     });
 }
 
 // 세그먼트 클릭 처리
 function handleSegmentClick(event, segment, segmentEl) {
     const isCtrlPressed = event.ctrlKey || event.metaKey;
+    const segmentId = segmentEl.dataset.segmentId;  
+      
+    // 복합 bbox인 경우 모든 관련 요소 찾기  
+    const isCompound = segment.is_compound && segment.bounding_boxes;  
+    const allRelatedElements = isCompound   
+        ? document.querySelectorAll(`[data-segment-id="${segmentId}"]`)  
+        : [segmentEl];  
+
+    console.log(allRelatedElements);
 
     if (!isCtrlPressed) {
         // 단일 선택 로직
@@ -174,55 +322,74 @@ function handleSegmentClick(event, segment, segmentEl) {
         clearAllSegments();
 
         if (!wasOnlySelection) {
-            segmentEl.classList.add('selected');
-            selectedSegments = [{ ...segment, element: segmentEl }];
-            updateSelectedSegmentUI(segment);
+            allRelatedElements.forEach(el => {  
+                el.classList.add('selected');  
+            });  
+            selectedSegments = [{ ...segment, element: segmentEl }];  
+            console.log('복합 세그먼트 선택:', selectedSegments); // 디버깅용
+            selectedSegmentIds = [segmentId];  
+            updateSelectedSegmentUI(segment);  
         }
     } else {
-        // 다중 선택 (Ctrl/Meta 클릭) 로직
-        if (selectedSegments.length === 1 && selectedSegments[0].element.classList.contains('selected')) {
-            selectedSegments[0].element.classList.remove('selected');
-            selectedSegments[0].element.classList.add('multi-selected');
-        }
-
-        const existingIndex = selectedSegments.findIndex(s => s.element === segmentEl);
-
-        if (existingIndex !== -1) {
-            // 이미 다중 선택에 있으면 제거
-            selectedSegments.splice(existingIndex, 1);
-            segmentEl.classList.remove('multi-selected');
-        } else {
-            // 다중 선택에 추가
-            if (selectedSegments.length < maxSegments) {
-                selectedSegments.push({ ...segment, element: segmentEl });
-                segmentEl.classList.add('multi-selected');
-            } else {
-                showNotification(`최대 ${maxSegments}개까지만 선택할 수 있습니다.`, 'warning');
-            }
-        }
-
-        // 선택된 개수에 따라 UI 업데이트
-        if (selectedSegments.length > 1) {
-            updateMultiSegmentUI();
-        } else if (selectedSegments.length === 1) {
-            const lastSegment = selectedSegments[0];
-            lastSegment.element.classList.remove('multi-selected');
-            lastSegment.element.classList.add('selected');
-            updateSelectedSegmentUI(lastSegment);
-        } else {
-            clearAllSegments();
-        }
+        // 다중 선택 (기존 로직 유지하되 복합 bbox 동기화 추가)
+        if (selectedSegments.length === 1 && selectedSegments[0].element.classList.contains('selected')) {  
+            const firstId = selectedSegmentIds[0];  
+            const firstElements = document.querySelectorAll(`[data-segment-id="${firstId}"]`);  
+              
+            firstElements.forEach(el => {  
+                el.classList.remove('selected');  
+                el.classList.add('multi-selected');  
+            });  
+        }  
+  
+        const existingIndex = selectedSegmentIds.indexOf(segmentId);  
+  
+        if (existingIndex !== -1) {  
+            // 제거  
+            selectedSegmentIds.splice(existingIndex, 1);  
+            selectedSegments.splice(existingIndex, 1);  
+            allRelatedElements.forEach(el => {  
+                el.classList.remove('multi-selected');  
+            });  
+        } else {  
+            // 추가  
+            if (selectedSegments.length < maxSegments) {  
+                selectedSegmentIds.push(segmentId);  
+                selectedSegments.push({ ...segment, element: segmentEl });  
+                allRelatedElements.forEach(el => {  
+                    el.classList.add('multi-selected');  
+                });  
+            }  
+        }  
+  
+        // UI 업데이트  
+        if (selectedSegments.length > 1) {  
+            updateMultiSegmentUI();  
+        } else if (selectedSegments.length === 1) {  
+            const lastId = selectedSegmentIds[0];  
+            const lastElements = document.querySelectorAll(`[data-segment-id="${lastId}"]`);  
+              
+            lastElements.forEach(el => {  
+                el.classList.remove('multi-selected');  
+                el.classList.add('selected');  
+            });  
+            updateSelectedSegmentUI(selectedSegments[0]);  
+        } else {  
+            clearAllSegments();  
+        }  
     }
 }
 
 // 모든 세그먼트 선택 해제
 export function clearAllSegments() {
-    selectedSegments.forEach(segment => {
-        if (segment.element) {
-            segment.element.classList.remove('selected', 'multi-selected');
-        }
+    selectedSegmentIds.forEach(segmentId => {  
+        const allElements = document.querySelectorAll(`[data-segment-id="${segmentId}"]`);  
+        allElements.forEach(el => {  
+            el.classList.remove('selected', 'multi-selected');  
+        });  
     });
     selectedSegments = [];
+    selectedSegmentIds = [];
     
     const indicator = document.getElementById('selectedSegmentIndicator');
     const multiSegments = document.getElementById('multiSelectedSegments');
@@ -273,22 +440,81 @@ function createSegmentPreviewImage(segment, previewElement) {
             return;
         }
 
-        // 세그먼트 좌표를 캔버스 좌표로 변환 (세그먼트는 PDF 원본 좌표계 사용)
-        const canvasWidth = pageCanvas.width;
-        const canvasHeight = pageCanvas.height;
+        // 캔버스 크기 정보
+        const canvasWidth = pageCanvas.width;  // 내부 해상도
+        const canvasHeight = pageCanvas.height; // 내부 해상도
+        const canvasCSSWidth = pageCanvas.offsetWidth;  // CSS 표시 크기
+        const canvasCSSHeight = pageCanvas.offsetHeight; // CSS 표시 크기
         
-        // 현재 스케일 가져오기 (뷰포트 스케일)
-        const pdfViewer = pageCanvas.closest('.pdf-viewer');
+        // 현재 스케일 가져오기
         let currentScale = 1.0;
         if (window.pdfViewer && window.pdfViewer.getCurrentScale) {
             currentScale = window.pdfViewer.getCurrentScale();
         }
         
-        // 세그먼트 좌표를 캔버스 좌표로 변환
-        const x = segment.left;
-        const y = segment.top; 
-        const width = segment.width;
-        const height = segment.height;
+        // 실제 세그먼트 오버레이 위치 확인 (더 정확한 방법)
+        let actualPosition = null;
+        
+        // 1. 먼저 선택된 세그먼트에서 실제 엘리먼트 찾기
+        const selectedSegment = selectedSegments.find(s => s.id === segment.id || s.left === segment.left && s.top === segment.top);
+        if (selectedSegment && selectedSegment.element) {
+            const rect = selectedSegment.element.getBoundingClientRect();
+            const canvasRect = pageCanvas.getBoundingClientRect();
+            actualPosition = {
+                left: rect.left - canvasRect.left,
+                top: rect.top - canvasRect.top,
+                width: rect.width,
+                height: rect.height
+            };
+            console.log('📍 선택된 세그먼트 엘리먼트에서 위치 추출');
+        } else {
+            // 2. 폴백: data-segment-id로 찾기
+            const segmentId = segment.id || `page${segment.page_number}_${segments.findIndex(s => s === segment)}`;
+            const actualSegmentEl = document.querySelector(`[data-segment-id="${segmentId}"]`);
+            if (actualSegmentEl) {
+                const rect = actualSegmentEl.getBoundingClientRect();
+                const canvasRect = pageCanvas.getBoundingClientRect();
+                actualPosition = {
+                    left: rect.left - canvasRect.left,
+                    top: rect.top - canvasRect.top,
+                    width: rect.width,
+                    height: rect.height
+                };
+                console.log('🎯 data-segment-id로 위치 찾음');
+            }
+        }
+
+        // 디버깅 로그
+        console.log('🔍 세그먼트 미리보기 디버깅:', {
+            segment: { left: segment.left, top: segment.top, width: segment.width, height: segment.height },
+            canvas: { width: canvasWidth, height: canvasHeight },
+            css: { width: canvasCSSWidth, height: canvasCSSHeight },
+            currentScale,
+            ratio: canvasWidth / canvasCSSWidth,
+            viewport: window.currentPageViewports?.[segment.page_number] ? '있음' : '없음',
+            actualSegmentPosition: actualPosition
+        });
+        
+        // 🎯 새로운 접근: 실제 화면의 세그먼트 오버레이 위치를 직접 사용
+        if (actualPosition) {
+            // 실제 세그먼트 오버레이 위치를 캔버스 좌표로 변환
+            const scaleRatio = canvasWidth / canvasCSSWidth;
+            var x = actualPosition.left * scaleRatio;
+            var y = actualPosition.top * scaleRatio; 
+            var width = actualPosition.width * scaleRatio;
+            var height = actualPosition.height * scaleRatio;
+            
+            console.log('✅ 실제 오버레이 위치 사용:', { x, y, width, height });
+        } else {
+            // 폴백: 원본 좌표 직접 사용
+            const scaleRatio = canvasWidth / canvasCSSWidth;
+            var x = segment.left * scaleRatio;
+            var y = segment.top * scaleRatio; 
+            var width = segment.width * scaleRatio;
+            var height = segment.height * scaleRatio;
+            
+            console.log('⚠️ 폴백 좌표 사용:', { x, y, width, height });
+        }
 
         // 좌표 유효성 검사
         if (x < 0 || y < 0 || width <= 0 || height <= 0 || 
@@ -463,12 +689,12 @@ export function toggleImageMode() {
     if (toggleBtn) {
         if (isImageModeActive) {
             toggleBtn.classList.add('active');
-            toggleBtn.title = '이미지 모드 활성화됨: 채팅 전송 시 이미지로 함께 전송';
-            showNotification('이미지 모드가 켜졌습니다. 이제 채팅 전송 시 선택된 영역이 이미지로 함께 전송됩니다.', 'info');
+            toggleBtn.title = '정밀 모드 활성화됨: 모든 영역을 고화질 이미지로 정확하게 분석';
+            showNotification('정밀 모드가 켜졌습니다. 이제 채팅 전송 시 선택된 영역이 고화질 이미지로 정확하게 분석됩니다.', 'info');
         } else {
             toggleBtn.classList.remove('active');
-            toggleBtn.title = '이미지 모드: 채팅과 함께 이미지로 전송';
-            showNotification('이미지 모드가 꺼졌습니다.', 'info');
+            toggleBtn.title = '정밀 모드: 모든 영역을 고화질 이미지로 정확하게 분석';
+            showNotification('정밀 모드가 꺼졌습니다.', 'info');
         }
     }
 }
