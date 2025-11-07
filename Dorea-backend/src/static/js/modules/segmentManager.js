@@ -114,116 +114,131 @@ function createSegmentElement(segment, index, pageNum, viewport) {
 
     // 복합 bbox가 아닌 경우: 기존 로직 사용
     if (!segment.is_compound || !segment.bounding_boxes) {
-    const segmentEl = document.createElement('div');
-    segmentEl.className = 'segment';
-    segmentEl.dataset.segmentIndex = index;
-    segmentEl.dataset.segmentId = segment.id || `page${pageNum}_${index}`;
+        const segmentEl = document.createElement('div');
+        segmentEl.className = 'segment';
+        segmentEl.dataset.segmentIndex = index;
+        segmentEl.dataset.segmentId = segment.id || `page${pageNum}_${index}`; // createSegmentPreviewImage를 위해 남겨둠
+        segmentEl.dataset.segmentIds = JSON.stringify([segment.id || `page${pageNum}_${index}`]) // segmentId에서 segmentIds 사용으로 변경
 
 
-    // 🚨 비정상 매트릭스 감지 및 수정
-    const transform = viewport.transform;
-    const isRotatedMatrix = (transform[0] === 0 && transform[3] === 0);
-    
-    let calculatedLeft, calculatedTop;
-    
-    // 🎯 근본 해결: PDF 좌표 → 화면 픽셀 변환 (Y축 반전 고려)
-    
-    // PDF.js transform matrix 사용 (PDF 포인트 → 화면 픽셀)
-    const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
-    calculatedLeft = segment.left * scaleX + offsetX;
-    
-    if (scaleY < 0) {
-        // Y축이 뒤집힌 경우: Y좌표 반전 처리
-        calculatedTop = (segment.top + segment.height) * scaleY + offsetY;
+        // 🚨 비정상 매트릭스 감지 및 수정
+        const transform = viewport.transform;
+        const isRotatedMatrix = (transform[0] === 0 && transform[3] === 0);
+        
+        let calculatedLeft, calculatedTop;
+        
+        // 🎯 근본 해결: PDF 좌표 → 화면 픽셀 변환 (Y축 반전 고려)
+        
+        // PDF.js transform matrix 사용 (PDF 포인트 → 화면 픽셀)
+        const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
+        calculatedLeft = segment.left * scaleX + offsetX;
+        
+        if (scaleY < 0) {
+            // Y축이 뒤집힌 경우: Y좌표 반전 처리
+            calculatedTop = (segment.top + segment.height) * scaleY + offsetY;
+        } else {
+            // 정상 Y축
+            calculatedTop = segment.top * scaleY + offsetY;
+        }
+
+        // 🔄 Y좌표만 상하반전 (나머지 로직은 완벽하므로 건드리지 않음)
+        const flippedTop = viewport.height - calculatedTop - (segment.height * Math.abs(scaleY));
+        
+        segmentEl.style.left = calculatedLeft + 'px';
+        segmentEl.style.top = flippedTop + 'px';
+        segmentEl.style.width = (segment.width * Math.abs(scaleX)) + 'px';
+        segmentEl.style.height = (segment.height * Math.abs(scaleY)) + 'px';
+
+        const typeColors = {
+            'Text': 'rgba(59, 130, 246, 0.3)',
+            'Picture': 'rgba(16, 185, 129, 0.3)',
+            'Figure': 'rgba(16, 185, 129, 0.3)',
+            'Table': 'rgba(245, 158, 11, 0.3)',
+            'Title': 'rgba(190, 24, 93, 0.3)',
+            'Caption': 'rgba(124, 58, 237, 0.3)'
+        };
+
+        segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
+
+        segmentEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleSegmentClick(e, segment, segmentEl);
+        });
+
+        return segmentEl;
     } else {
-        // 정상 Y축
-        calculatedTop = segment.top * scaleY + offsetY;
-    }
+        // 복합 bbox인 경우: 배열 반환  
+        const elements = [];  
+        const bboxes = segment.bounding_boxes;  
+        
+        // 현재 페이지의 bbox만 필터링  
+        const pageBboxes = bboxes.filter(bbox => bbox.page_number === pageNum);  
+        
+        // chunk 멤버들에 할당할 통일된 segment ID 생성  
+        const unifiedSegmentId = `page${segment.chunk_index}`;
+        
+        pageBboxes.forEach((bbox, bboxIndex) => {
+            const chunk_element_key = `element_${bbox.self_ref}`
 
-    // 🔄 Y좌표만 상하반전 (나머지 로직은 완벽하므로 건드리지 않음)
-    const flippedTop = viewport.height - calculatedTop - (segment.height * Math.abs(scaleY));
-    
-    segmentEl.style.left = calculatedLeft + 'px';
-    segmentEl.style.top = flippedTop + 'px';
-    segmentEl.style.width = (segment.width * Math.abs(scaleX)) + 'px';
-    segmentEl.style.height = (segment.height * Math.abs(scaleY)) + 'px';
+            let existingEl = document.querySelector(`[data-bbox-key="${chunk_element_key}"]`);
 
-    const typeColors = {
-        'Text': 'rgba(59, 130, 246, 0.3)',
-        'Picture': 'rgba(16, 185, 129, 0.3)',
-        'Figure': 'rgba(16, 185, 129, 0.3)',
-        'Table': 'rgba(245, 158, 11, 0.3)',
-        'Title': 'rgba(190, 24, 93, 0.3)',
-        'Caption': 'rgba(124, 58, 237, 0.3)'
-    };
+            if (existingEl) {
+                // 기존 DOM에 segment ID 추가
+                const existingIds = JSON.parse(existingEl.dataset.segmentIds || '[]');
+                if (!existingIds.includes(unifiedSegmentId)) {
+                    existingIds.push(unifiedSegmentId);
+                    existingEl.dataset.segmentIds = JSON.stringify(existingIds);
+                }
+                elements.push(existingEl);
+            } else {
+                const segmentEl = document.createElement('div');
+                segmentEl.className = 'segment';
+                segmentEl.dataset.segmentId = unifiedSegmentId; // 일단 남겨둠
+                segmentEl.dataset.segmentIds = JSON.stringify([unifiedSegmentId]);
+                segmentEl.dataset.bboxIndex = bboxIndex;
+                segmentEl.dataset.bboxKey = chunk_element_key;
+                
+                // bbox 좌표로 변환 (기존 로직 재사용)
+                const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
+                const calculatedLeft = bbox.left * scaleX + offsetX;
+                
+                let calculatedTop;
+                if (scaleY < 0) {
+                    calculatedTop = (bbox.top + bbox.height) * scaleY + offsetY;
+                } else {
+                    calculatedTop = bbox.top * scaleY + offsetY;
+                }
+                
+                const flippedTop = viewport.height - calculatedTop - (bbox.height * Math.abs(scaleY));
+                
+                segmentEl.style.left = calculatedLeft + 'px';
+                segmentEl.style.top = flippedTop + 'px';
+                segmentEl.style.width = (bbox.width * Math.abs(scaleX)) + 'px';
+                segmentEl.style.height = (bbox.height * Math.abs(scaleY)) + 'px';
 
-    segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
+                const typeColors = {
+                    'Text': 'rgba(59, 130, 246, 0.3)',
+                    'Picture': 'rgba(16, 185, 129, 0.3)',
+                    'Figure': 'rgba(16, 185, 129, 0.3)',
+                    'Table': 'rgba(245, 158, 11, 0.3)',
+                    'Title': 'rgba(190, 24, 93, 0.3)',
+                    'Caption': 'rgba(124, 58, 237, 0.3)'
+                };
 
-    segmentEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        handleSegmentClick(e, segment, segmentEl);
-    });
+                segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
+                
+                segmentEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleSegmentClick(e, segment, segmentEl);
+                });
+                
+                elements.push(segmentEl);
+            }
+        });
 
-    return segmentEl;
-    } else {
-    // 복합 bbox인 경우: 배열 반환  
-    const elements = [];  
-    const bboxes = segment.bounding_boxes;  
-      
-    // 현재 페이지의 bbox만 필터링  
-    const pageBboxes = bboxes.filter(bbox => bbox.page_number === pageNum);  
-      
-    // 통일된 segment ID 생성  
-    const unifiedSegmentId = `page${segment.chunk_index}`;
-      
-    pageBboxes.forEach((bbox, bboxIndex) => {  
-        const segmentEl = document.createElement('div');  
-        segmentEl.className = 'segment';  
-        segmentEl.dataset.segmentId = unifiedSegmentId;  
-        segmentEl.dataset.bboxIndex = bboxIndex;  
-          
-        // bbox 좌표로 변환 (기존 로직 재사용)  
-        const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;  
-        const calculatedLeft = bbox.left * scaleX + offsetX;  
-          
-        let calculatedTop;  
-        if (scaleY < 0) {  
-            calculatedTop = (bbox.top + bbox.height) * scaleY + offsetY;  
-        } else {  
-            calculatedTop = bbox.top * scaleY + offsetY;  
-        }  
-          
-        const flippedTop = viewport.height - calculatedTop - (bbox.height * Math.abs(scaleY));  
-          
-        segmentEl.style.left = calculatedLeft + 'px';  
-        segmentEl.style.top = flippedTop + 'px';  
-        segmentEl.style.width = (bbox.width * Math.abs(scaleX)) + 'px';  
-        segmentEl.style.height = (bbox.height * Math.abs(scaleY)) + 'px';  
-  
-        const typeColors = {  
-            'Text': 'rgba(59, 130, 246, 0.3)',  
-            'Picture': 'rgba(16, 185, 129, 0.3)',  
-            'Figure': 'rgba(16, 185, 129, 0.3)',  
-            'Table': 'rgba(245, 158, 11, 0.3)',  
-            'Title': 'rgba(190, 24, 93, 0.3)',  
-            'Caption': 'rgba(124, 58, 237, 0.3)'  
-        };  
-  
-        segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';  
-          
-        segmentEl.addEventListener('click', (e) => {  
-            e.stopPropagation();  
-            handleSegmentClick(e, segment, segmentEl);  
-        });  
-          
-        elements.push(segmentEl);  
-    });  
-      
-    return elements; // 배열 반환  
+        return elements; // 배열 반환
     
     }
-
-
 }
 
 // 세그먼트 오버레이 업데이트 (단일 페이지 모드용)
@@ -271,32 +286,32 @@ function updateSegmentOverlay(viewport, pageNum) {
         overlay.appendChild(segmentEl);
         } else {
             // 복합 bbox: 배열의 모든 요소 추가
-    const segmentId = result[0].dataset.segmentId;  
-      
-    result.forEach(segmentEl => {  
-        // 선택 상태 복원  
-        if (selectedSegmentIds.includes(segmentId)) {  
-            if (selectedSegmentIds.length === 1) {  
-                segmentEl.classList.add('selected');  
-            } else {  
-                segmentEl.classList.add('multi-selected');  
-            }  
-        }  
-        overlay.appendChild(segmentEl);  
-    });  
-      
-    // selectedSegments 배열 업데이트 (첫 번째 요소만 저장)  
-    if (selectedSegmentIds.includes(segmentId)) {  
-        const existingIndex = selectedSegments.findIndex(s =>   
-            (s.id && s.id === segmentId) ||   
-            (s.element && s.element.dataset.segmentId === segmentId)  
-        );  
-        if (existingIndex === -1) {  
-            selectedSegments.push({ ...segment, element: result[0] });  
-        } else {  
-            selectedSegments[existingIndex].element = result[0];  
-        }  
-    }
+            const segmentId = result[0].dataset.segmentId;
+            
+            result.forEach(segmentEl => {
+                // 선택 상태 복원
+                if (selectedSegmentIds.includes(segmentId)) {
+                    if (selectedSegmentIds.length === 1) {
+                        segmentEl.classList.add('selected');
+                    } else {
+                        segmentEl.classList.add('multi-selected');
+                    }
+                }
+                overlay.appendChild(segmentEl);
+            });
+            
+            // selectedSegments 배열 업데이트 (첫 번째 요소만 저장)
+            if (selectedSegmentIds.includes(segmentId)) {
+                const existingIndex = selectedSegments.findIndex(s =>
+                    (s.id && s.id === segmentId) ||
+                    (s.element && s.element.dataset.segmentId === segmentId)
+                );
+                if (existingIndex === -1) {
+                    selectedSegments.push({ ...segment, element: result[0] });
+                } else {
+                    selectedSegments[existingIndex].element = result[0];
+                }
+            }
         }
     });
 }
@@ -304,13 +319,26 @@ function updateSegmentOverlay(viewport, pageNum) {
 // 세그먼트 클릭 처리
 function handleSegmentClick(event, segment, segmentEl) {
     const isCtrlPressed = event.ctrlKey || event.metaKey;
-    const segmentId = segmentEl.dataset.segmentId;  
-      
+    // const segmentId = segmentEl.dataset.segmentId;
+    const segmentIds = JSON.parse(segmentEl.dataset.segmentIds || '[]');
     // 복합 bbox인 경우 모든 관련 요소 찾기  
-    const isCompound = segment.is_compound && segment.bounding_boxes;  
-    const allRelatedElements = isCompound   
-        ? document.querySelectorAll(`[data-segment-id="${segmentId}"]`)  
-        : [segmentEl];  
+    const isCompound = segment.is_compound && segment.bounding_boxes;
+    // const allRelatedElements = isCompound
+    //     ? document.querySelectorAll(`[data-segment-id="${segmentId}"]`)
+    //     : [segmentEl];
+    const allRelatedElements = isCompound
+        ? Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
+            el => {
+                try {
+                    const elIds = JSON.parse(el.dataset.segmentIds);
+                    return segmentIds.some(id => elIds.includes(id));
+                } catch (e) {
+                    console.error("Failed to parse segment IDs:", e);
+                    return false;
+                }
+            }
+        )
+        : [segmentEl];
 
     console.log(allRelatedElements);
 
@@ -322,19 +350,29 @@ function handleSegmentClick(event, segment, segmentEl) {
         clearAllSegments();
 
         if (!wasOnlySelection) {
-            allRelatedElements.forEach(el => {  
-                el.classList.add('selected');  
-            });  
-            selectedSegments = [{ ...segment, element: segmentEl }];  
+            allRelatedElements.forEach(el => {
+                el.classList.add('selected');
+            });
+            selectedSegments = [{ ...segment, element: segmentEl }];
             console.log('복합 세그먼트 선택:', selectedSegments); // 디버깅용
-            selectedSegmentIds = [segmentId];  
-            updateSelectedSegmentUI(segment);  
+            selectedSegmentIds = segmentIds;
+            updateSelectedSegmentUI(segment);
         }
     } else {
         // 다중 선택 (기존 로직 유지하되 복합 bbox 동기화 추가)
         if (selectedSegments.length === 1 && selectedSegments[0].element.classList.contains('selected')) {  
             const firstId = selectedSegmentIds[0];  
-            const firstElements = document.querySelectorAll(`[data-segment-id="${firstId}"]`);  
+            const firstElements = Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
+                el => {
+                    try {
+                        const ids = JSON.parse(el.dataset.segmentIds);
+                        return ids.includes(firstId);
+                    } catch (e) {
+                        console.error("Failed to parse segment IDs:", e);
+                        return false;
+                    }
+                }
+            )
               
             firstElements.forEach(el => {  
                 el.classList.remove('selected');  
@@ -342,7 +380,15 @@ function handleSegmentClick(event, segment, segmentEl) {
             });  
         }  
   
-        const existingIndex = selectedSegmentIds.indexOf(segmentId);  
+        // const existingIndex = selectedSegmentIds.indexOf(segmentId);
+        // 여러 ID 중 하나라도 이미 선택되어 있는지 확인
+        const existingIndex = selectedSegments.findIndex(s => {
+            const sIds = s.element.dataset.segmentIds
+                ? JSON.parse(s.element.dataset.segmentIds)
+                : [s.element.dataset.segmentId];
+            // 교집합이 있는지 확인
+            return segmentIds.some(id => sIds.includes(id));
+        });
   
         if (existingIndex !== -1) {  
             // 제거  
@@ -354,7 +400,11 @@ function handleSegmentClick(event, segment, segmentEl) {
         } else {  
             // 추가  
             if (selectedSegments.length < maxSegments) {  
-                selectedSegmentIds.push(segmentId);  
+                segmentIds.forEach(id => {
+                    if (!selectedSegmentIds.includes(id)) {
+                        selectedSegmentIds.push(id);
+                    }
+                });
                 selectedSegments.push({ ...segment, element: segmentEl });  
                 allRelatedElements.forEach(el => {  
                     el.classList.add('multi-selected');  
@@ -367,7 +417,17 @@ function handleSegmentClick(event, segment, segmentEl) {
             updateMultiSegmentUI();  
         } else if (selectedSegments.length === 1) {  
             const lastId = selectedSegmentIds[0];  
-            const lastElements = document.querySelectorAll(`[data-segment-id="${lastId}"]`);  
+            const lastElements = Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
+                el => {
+                    try {
+                        const ids = JSON.parse(el.dataset.segmentIds);
+                        return ids.includes(lastId);
+                    } catch (e) {
+                        console.error("Failed to parse segment IDs:", e);
+                        return false;
+                    }
+                }
+            )
               
             lastElements.forEach(el => {  
                 el.classList.remove('multi-selected');  
@@ -383,7 +443,17 @@ function handleSegmentClick(event, segment, segmentEl) {
 // 모든 세그먼트 선택 해제
 export function clearAllSegments() {
     selectedSegmentIds.forEach(segmentId => {  
-        const allElements = document.querySelectorAll(`[data-segment-id="${segmentId}"]`);  
+        const allElements = Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
+            el => {
+                try {
+                    const ids = JSON.parse(el.dataset.segmentIds);
+                    return ids.includes(segmentId);
+                } catch (e) {
+                    console.error("Failed to parse segment IDs:", e);
+                    return false;
+                }
+            }
+        )
         allElements.forEach(el => {  
             el.classList.remove('selected', 'multi-selected');  
         });  

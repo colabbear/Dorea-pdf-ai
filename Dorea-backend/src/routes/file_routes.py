@@ -350,6 +350,7 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
 
             texts_bboxes[text_self_ref].append(
                 {
+                    'self_ref': text_self_ref, # table bbox 정리에 추가하면서 함께 추가
                     'page_number': page_no,
                     'left': converted_bbox['left'],
                     'top': converted_bbox['top'],
@@ -372,8 +373,12 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
 
             converted_bbox = convert_bbox_coordinates(bbox, coord_origin, page_height)
 
+            # 2025/11/07
+            # 하나의 table이 분할되어 서로 다른 chunk에 포함될 수 있으므로 해당 테이블 DOM이 여러 segment id를 가질 수 있게 해야 함
+            # 따라서 DOM이 이미 생성되었는지 확인하는 용도로 self_ref 추가
             tables_bboxes[table_self_ref].append(
                 {
+                    'self_ref': table_self_ref,
                     'page_number': page_no,
                     'left': converted_bbox['left'],
                     'top': converted_bbox['top'],
@@ -385,9 +390,9 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
     # chunks 배열 처리
     for chunk in docling_chunk_json.get('chunks', []):
         segment = {
-                'chunk_index': chunk.get('chunk_index', ''), # 디버그용
+                'chunk_index': chunk.get('chunk_index', ''), # 각 청크의 DOM 집합에 할당할 고유한 segment_id 생성에 사용
                 'num_tokens': chunk.get('num_tokens', ''), # 디버그용
-                'page_numbers': chunk.get('page_numbers', []), # 디버그용
+                'page_numbers': chunk.get('page_numbers', []),
                 'type': 'Text',
                 'text': chunk.get('text', ''), # 청크 content
                 'confidence': 1.0,
@@ -399,6 +404,7 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
                     doc_item,
                     [
                         {
+                            'self_ref': 'Unknown',
                             'page_number': 1,
                             'left': 0,
                             'top': 0,
@@ -414,6 +420,7 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
                     doc_item,
                     [
                         {
+                            'self_ref': 'Unknown',
                             'page_number': 1,
                             'left': 0,
                             'top': 0,
