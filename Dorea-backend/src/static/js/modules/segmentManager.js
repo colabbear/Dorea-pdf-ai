@@ -118,54 +118,125 @@ function createSegmentElement(segment, index, pageNum, viewport) {
         segmentEl.className = 'segment';
         segmentEl.dataset.segmentIndex = index;
         segmentEl.dataset.segmentId = segment.id || `page${pageNum}_${index}`; // createSegmentPreviewImage를 위해 남겨둠
-        segmentEl.dataset.segmentIds = JSON.stringify([segment.id || `page${pageNum}_${index}`]) // segmentId에서 segmentIds 사용으로 변경
+        segmentEl.dataset.segmentIds = JSON.stringify([segment.id || `page${pageNum}_${index}`]);
 
+        if (segment?.self_ref != null && segment.self_ref !== '') {
 
-        // 🚨 비정상 매트릭스 감지 및 수정
-        const transform = viewport.transform;
-        const isRotatedMatrix = (transform[0] === 0 && transform[3] === 0);
-        
-        let calculatedLeft, calculatedTop;
-        
-        // 🎯 근본 해결: PDF 좌표 → 화면 픽셀 변환 (Y축 반전 고려)
-        
-        // PDF.js transform matrix 사용 (PDF 포인트 → 화면 픽셀)
-        const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
-        calculatedLeft = segment.left * scaleX + offsetX;
-        
-        if (scaleY < 0) {
-            // Y축이 뒤집힌 경우: Y좌표 반전 처리
-            calculatedTop = (segment.top + segment.height) * scaleY + offsetY;
+            const unifiedSegmentId = `page${segment.chunk_index}`;
+            segmentEl.dataset.segmentIds = JSON.stringify([unifiedSegmentId]); // segmentId에서 segmentIds 사용으로 변경
+
+            const chunk_element_key = `element_${segment.self_ref}`
+            let existingEl = document.querySelector(`[data-bbox-key="${chunk_element_key}"]`);
+
+            if (existingEl) {
+                // 기존 DOM에 segment ID 추가
+                const existingIds = JSON.parse(existingEl.dataset.segmentIds || '[]');
+                if (!existingIds.includes(unifiedSegmentId)) {
+                    existingIds.push(unifiedSegmentId);
+                    existingEl.dataset.segmentIds = JSON.stringify(existingIds);
+                }
+                return existingEl;
+            } else {
+                segmentEl.dataset.segmentIds = JSON.stringify([unifiedSegmentId]);
+                segmentEl.dataset.bboxKey = chunk_element_key;
+                
+                // 🚨 비정상 매트릭스 감지 및 수정
+                const transform = viewport.transform;
+                const isRotatedMatrix = (transform[0] === 0 && transform[3] === 0);
+                
+                let calculatedLeft, calculatedTop;
+                
+                // 🎯 근본 해결: PDF 좌표 → 화면 픽셀 변환 (Y축 반전 고려)
+                
+                // PDF.js transform matrix 사용 (PDF 포인트 → 화면 픽셀)
+                const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
+                calculatedLeft = segment.left * scaleX + offsetX;
+                
+                if (scaleY < 0) {
+                    // Y축이 뒤집힌 경우: Y좌표 반전 처리
+                    calculatedTop = (segment.top + segment.height) * scaleY + offsetY;
+                } else {
+                    // 정상 Y축
+                    calculatedTop = segment.top * scaleY + offsetY;
+                }
+
+                // 🔄 Y좌표만 상하반전 (나머지 로직은 완벽하므로 건드리지 않음)
+                const flippedTop = viewport.height - calculatedTop - (segment.height * Math.abs(scaleY));
+                
+                segmentEl.style.left = calculatedLeft + 'px';
+                segmentEl.style.top = flippedTop + 'px';
+                segmentEl.style.width = (segment.width * Math.abs(scaleX)) + 'px';
+                segmentEl.style.height = (segment.height * Math.abs(scaleY)) + 'px';
+
+                const typeColors = {
+                    'Text': 'rgba(59, 130, 246, 0.3)',
+                    'Picture': 'rgba(16, 185, 129, 0.3)',
+                    'Figure': 'rgba(16, 185, 129, 0.3)',
+                    'Table': 'rgba(245, 158, 11, 0.3)',
+                    'Title': 'rgba(190, 24, 93, 0.3)',
+                    'Caption': 'rgba(124, 58, 237, 0.3)'
+                };
+
+                segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
+
+                segmentEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleSegmentClick(e, segment, segmentEl);
+                });
+
+                return segmentEl;
+            }
+
         } else {
-            // 정상 Y축
-            calculatedTop = segment.top * scaleY + offsetY;
+            const chunk_element_key = `element_it's_huridocs_segment`;
+            let existingEl = null;
+
+            // 🚨 비정상 매트릭스 감지 및 수정
+            const transform = viewport.transform;
+            const isRotatedMatrix = (transform[0] === 0 && transform[3] === 0);
+            
+            let calculatedLeft, calculatedTop;
+            
+            // 🎯 근본 해결: PDF 좌표 → 화면 픽셀 변환 (Y축 반전 고려)
+            
+            // PDF.js transform matrix 사용 (PDF 포인트 → 화면 픽셀)
+            const [scaleX, , , scaleY, offsetX, offsetY] = viewport.transform;
+            calculatedLeft = segment.left * scaleX + offsetX;
+            
+            if (scaleY < 0) {
+                // Y축이 뒤집힌 경우: Y좌표 반전 처리
+                calculatedTop = (segment.top + segment.height) * scaleY + offsetY;
+            } else {
+                // 정상 Y축
+                calculatedTop = segment.top * scaleY + offsetY;
+            }
+
+            // 🔄 Y좌표만 상하반전 (나머지 로직은 완벽하므로 건드리지 않음)
+            const flippedTop = viewport.height - calculatedTop - (segment.height * Math.abs(scaleY));
+            
+            segmentEl.style.left = calculatedLeft + 'px';
+            segmentEl.style.top = flippedTop + 'px';
+            segmentEl.style.width = (segment.width * Math.abs(scaleX)) + 'px';
+            segmentEl.style.height = (segment.height * Math.abs(scaleY)) + 'px';
+
+            const typeColors = {
+                'Text': 'rgba(59, 130, 246, 0.3)',
+                'Picture': 'rgba(16, 185, 129, 0.3)',
+                'Figure': 'rgba(16, 185, 129, 0.3)',
+                'Table': 'rgba(245, 158, 11, 0.3)',
+                'Title': 'rgba(190, 24, 93, 0.3)',
+                'Caption': 'rgba(124, 58, 237, 0.3)'
+            };
+
+            segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
+
+            segmentEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleSegmentClick(e, segment, segmentEl);
+            });
+
+            return segmentEl;
         }
-
-        // 🔄 Y좌표만 상하반전 (나머지 로직은 완벽하므로 건드리지 않음)
-        const flippedTop = viewport.height - calculatedTop - (segment.height * Math.abs(scaleY));
-        
-        segmentEl.style.left = calculatedLeft + 'px';
-        segmentEl.style.top = flippedTop + 'px';
-        segmentEl.style.width = (segment.width * Math.abs(scaleX)) + 'px';
-        segmentEl.style.height = (segment.height * Math.abs(scaleY)) + 'px';
-
-        const typeColors = {
-            'Text': 'rgba(59, 130, 246, 0.3)',
-            'Picture': 'rgba(16, 185, 129, 0.3)',
-            'Figure': 'rgba(16, 185, 129, 0.3)',
-            'Table': 'rgba(245, 158, 11, 0.3)',
-            'Title': 'rgba(190, 24, 93, 0.3)',
-            'Caption': 'rgba(124, 58, 237, 0.3)'
-        };
-
-        segmentEl.style.backgroundColor = typeColors[segment.type] || 'rgba(59, 130, 246, 0.3)';
-
-        segmentEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            handleSegmentClick(e, segment, segmentEl);
-        });
-
-        return segmentEl;
     } else {
         // 복합 bbox인 경우: 배열 반환  
         const elements = [];  

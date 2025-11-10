@@ -440,6 +440,9 @@ def convert_docling_chunk_to_segments(docling_chunk_json: dict) -> list:
         segment['width'] = segment['bounding_boxes'][0]['width']
         segment['height'] = segment['bounding_boxes'][0]['height']
 
+        # 단일 bbox로 이루어진 segment임에도 다른 segment와 bbox를 공유할 수도 있으므로 다음이 필요함
+        segment['self_ref'] = segment['bounding_boxes'][0]['self_ref']
+
         if len(segment['bounding_boxes']) > 1:
             segment['is_compound'] = True
         else:
