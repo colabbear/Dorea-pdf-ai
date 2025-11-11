@@ -455,7 +455,7 @@ function handleSegmentClick(event, segment, segmentEl) {
             }
         }
     } else {
-        // 다중 선택 (기존 로직 유지하되 복합 bbox 동기화 추가)
+        // 다중 선택
         if (selectedSegments.length === 1 && selectedSegments[0].element.classList.contains('selected')) {  
             const firstId = selectedSegmentIds[0];  
             const firstElements = Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
@@ -517,9 +517,6 @@ function handleSegmentClick(event, segment, segmentEl) {
                 // 앞서 정리된 selectedSegments에 el과 일치하는 element를 가진 요소가 있으면 multi-selected remove 안 함
                 if (remainingSegments.length === 0) {
                     el.classList.remove('multi-selected');
-                } else if (remainingSegments.length === 1) {
-                    el.classList.remove('multi-selected');
-                    el.classList.add('selected');
                 }
             });
         } else {  
@@ -879,10 +876,60 @@ function updateMultiSegmentUI() {
 
 // 세그먼트 제거
 export function removeSegment(index) {
-    if (selectedSegments[index] && selectedSegments[index].element) {
-        selectedSegments[index].element.classList.remove('multi-selected');
-    }
-    selectedSegments.splice(index, 1);
+    const removeSegmentId = `page${selectedSegments[index].chunk_index}`;
+
+    const allRelatedElements = Array.from(document.querySelectorAll('[data-segment-ids]')).filter(
+        el => {
+            try {
+                const elIds = JSON.parse(el.dataset.segmentIds);
+                return elIds.includes(removeSegmentId);
+            } catch (e) {
+                console.error("Failed to parse segment IDs:", e);
+                return false;
+            }
+        }
+    );
+
+    console.log('삭제할 segment와 연관된 elements', allRelatedElements)
+
+    // 삭제하는 segment와 같은 chunk의 모든 index 찾기
+    // 같은 청크라면 chunk_index가 같음
+    const allRelatedIndex = selectedSegments
+    .map(
+        (value, index) => ({value, index})
+    )
+    .filter(s => {
+        const unifiedSegmentId = `page${s.value.chunk_index}`;
+        // 찾기
+        return unifiedSegmentId === removeSegmentId;
+    })
+    .map(
+        s => s.index
+    );
+
+    // 인덱스를 내림차순으로 정렬
+    // 앞의 배열부터 제거하면 인덱스가 앞으로 당겨지므로 큰 인덱스부터 제거해야 함
+    allRelatedIndex.sort((a, b) => b - a);
+
+    // splice()를 사용하여 큰 인덱스부터 제거
+    allRelatedIndex.forEach(index => {
+        // index 위치에서 1개의 요소를 제거
+        selectedSegmentIds.splice(index, 1);
+        selectedSegments.splice(index, 1);
+    });
+
+    allRelatedElements.forEach(el => {
+        // 앞서 정리된 selectedSegments에 el과 일치하는 element를 가진 잔여 segment들
+        const remainingSegments = selectedSegments.filter(selectedSegment => {
+            return selectedSegment.element === el;
+        });
+
+        // 앞서 정리된 selectedSegments에 el과 일치하는 element를 가진 요소가 있으면 multi-selected remove 안 함
+        if (remainingSegments.length === 0) {
+            el.classList.remove('multi-selected');
+        }
+    });
+    
     updateMultiSegmentUI();
 }
 
