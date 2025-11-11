@@ -58,25 +58,25 @@ function updateSegmentOverlayById(overlayId, viewport, pageNum) {
         const result = createSegmentElement(segment, index, pageNum, viewport);
         
         if (!Array.isArray(result)) {
-        // 이전에 선택된 세그먼트인지 확인하고 선택 상태 복원
-        const segmentEl = result;
-        const segmentId = segment.id || `page${pageNum}_${index}`;
-        if (selectedSegmentIds.includes(segmentId)) {
-            if (selectedSegmentIds.length === 1) {
-                segmentEl.classList.add('selected');
-            } else {
-                segmentEl.classList.add('multi-selected');
+            // 이전에 선택된 세그먼트인지 확인하고 선택 상태 복원
+            const segmentEl = result;
+            const segmentId = segment.id || `page${pageNum}_${index}`;
+            if (selectedSegmentIds.includes(segmentId)) {
+                if (selectedSegmentIds.length === 1) {
+                    segmentEl.classList.add('selected');
+                } else {
+                    segmentEl.classList.add('multi-selected');
+                }
+                // selectedSegments 배열도 업데이트
+                const existingIndex = selectedSegments.findIndex(s => s.id === segmentId || s.segmentId === segmentId);
+                if (existingIndex === -1) {
+                    selectedSegments.push({ ...segment, element: segmentEl });
+                } else {
+                    selectedSegments[existingIndex].element = segmentEl;
+                }
             }
-            // selectedSegments 배열도 업데이트
-            const existingIndex = selectedSegments.findIndex(s => s.id === segmentId || s.segmentId === segmentId);
-            if (existingIndex === -1) {
-                selectedSegments.push({ ...segment, element: segmentEl });
-            } else {
-                selectedSegments[existingIndex].element = segmentEl;
-            }
-        }
         
-        overlay.appendChild(segmentEl);
+            overlay.appendChild(segmentEl);
         } else {
             // 복합 bbox: 배열의 모든 요소 추가
             const segmentId = result[0].dataset.segmentId;  
@@ -345,6 +345,7 @@ function updateSegmentOverlay(viewport, pageNum) {
             } else {
                 segmentEl.classList.add('multi-selected');
             }
+            
             // selectedSegments 배열도 업데이트
             const existingIndex = selectedSegments.findIndex(s => s.id === segmentId || s.segmentId === segmentId);
             if (existingIndex === -1) {
@@ -411,23 +412,47 @@ function handleSegmentClick(event, segment, segmentEl) {
         )
         : [segmentEl];
 
-    console.log(allRelatedElements);
+    // 2025/11/11
+    // segments의 모든 각 segment가 고유의 DOM이 생성되는 게 아니기 때문에 segmentIds를 기준으로 관련 segment를 얻어야 함
+    // 이제 기존 pdf 분석기인 huridocs 호환 가능성은 배제함
+    const allSegmentOfClikedBBOX = segments.filter(s => {
+        const unifiedSegmentId = `page${s.chunk_index}`;
+        return segmentIds.includes(unifiedSegmentId);
+    });
+
+    console.log('선택한 chunk', segmentIds);
+    console.log('선택한 chunk의 모든 element', allRelatedElements);
+    console.log('선택한 chunk의 모든 segment', allSegmentOfClikedBBOX);
 
     if (!isCtrlPressed) {
         // 단일 선택 로직
-        const isAlreadySelected = segmentEl.classList.contains('selected');
-        const wasOnlySelection = selectedSegments.length === 1 && isAlreadySelected;
+        const isAlreadySelected = segmentEl.classList.contains('selected') || segmentEl.classList.contains('multi-selected');
+        // const wasOnlySelection = selectedSegments.length === 1 && isAlreadySelected;
+        const wasOnlySelection = isAlreadySelected;
 
         clearAllSegments();
 
         if (!wasOnlySelection) {
-            allRelatedElements.forEach(el => {
-                el.classList.add('selected');
-            });
-            selectedSegments = [{ ...segment, element: segmentEl }];
-            console.log('복합 세그먼트 선택:', selectedSegments); // 디버깅용
+            // allSegmentOfClikedBBOX의 모든 segment 저장
+            selectedSegments = allSegmentOfClikedBBOX.map(segment => ({
+                ...segment,
+                element: segmentEl  // 클릭한 element
+            }));
+
             selectedSegmentIds = segmentIds;
-            updateSelectedSegmentUI(segment);
+
+            // 선택한 청크가 여러개인 경우 multi-selected 로 처리
+            if (segmentIds.length === 1) {
+                allRelatedElements.forEach(el => {
+                    el.classList.add('selected');
+                });
+                updateSelectedSegmentUI(segment);
+            } else {
+                allRelatedElements.forEach(el => {
+                    el.classList.add('multi-selected');
+                });
+                updateMultiSegmentUI();
+            }
         }
     } else {
         // 다중 선택 (기존 로직 유지하되 복합 bbox 동기화 추가)
@@ -452,36 +477,75 @@ function handleSegmentClick(event, segment, segmentEl) {
         }  
   
         // const existingIndex = selectedSegmentIds.indexOf(segmentId);
-        // 여러 ID 중 하나라도 이미 선택되어 있는지 확인
-        const existingIndex = selectedSegments.findIndex(s => {
-            const sIds = s.element.dataset.segmentIds
-                ? JSON.parse(s.element.dataset.segmentIds)
-                : [s.element.dataset.segmentId];
-            // 교집합이 있는지 확인
-            return segmentIds.some(id => sIds.includes(id));
-        });
+        // 2025/11/11
+        // 클릭한 element에 관계된 모든 chunk 즉 segment 삭제함
+        // existingIndex는 이제 배열로 얻음
+        // 이 변경된 부분도 huridocs 호환 고려하지 않음
+        const existingIndex = selectedSegments
+        .map(
+            (value, index) => ({value, index})
+        )
+        .filter(s => {
+            const unifiedSegmentId = `page${s.value.chunk_index}`
+            // 찾기
+            return segmentIds.includes(unifiedSegmentId);
+        })
+        .map(
+            s => s.index
+        );
   
-        if (existingIndex !== -1) {  
-            // 제거  
-            selectedSegmentIds.splice(existingIndex, 1);  
-            selectedSegments.splice(existingIndex, 1);  
-            allRelatedElements.forEach(el => {  
-                el.classList.remove('multi-selected');  
-            });  
+        if (existingIndex.length > 0) {
+            // 제거
+            
+            // 인덱스를 내림차순으로 정렬
+            // 앞의 배열부터 제거하면 인덱스가 앞으로 당겨지므로 큰 인덱스부터 제거해야 함
+            existingIndex.sort((a, b) => b - a);
+
+            // splice()를 사용하여 큰 인덱스부터 제거
+            existingIndex.forEach(index => {
+                // index 위치에서 1개의 요소를 제거
+                selectedSegmentIds.splice(index, 1);
+                selectedSegments.splice(index, 1);
+            });
+
+            allRelatedElements.forEach(el => {
+                // 앞서 정리된 selectedSegments에 el과 일치하는 element를 가진 잔여 segment들
+                const remainingSegments = selectedSegments.filter(selectedSegment => {
+                    return selectedSegment.element === el;
+                });
+
+                // 앞서 정리된 selectedSegments에 el과 일치하는 element를 가진 요소가 있으면 multi-selected remove 안 함
+                if (remainingSegments.length === 0) {
+                    el.classList.remove('multi-selected');
+                } else if (remainingSegments.length === 1) {
+                    el.classList.remove('multi-selected');
+                    el.classList.add('selected');
+                }
+            });
         } else {  
             // 추가  
             if (selectedSegments.length < maxSegments) {  
                 segmentIds.forEach(id => {
-                    if (!selectedSegmentIds.includes(id)) {
-                        selectedSegmentIds.push(id);
-                    }
+                    // if (!selectedSegmentIds.includes(id)) {
+                    //     selectedSegmentIds.push(id);
+                    // }
+                    // existingIndex.length가 이미 0이므로 기존 조건문 필요 없음
+                    selectedSegmentIds.push(id);
                 });
-                selectedSegments.push({ ...segment, element: segmentEl });  
-                allRelatedElements.forEach(el => {  
-                    el.classList.add('multi-selected');  
-                });  
-            }  
-        }  
+
+                // selectedSegments.push({ ...segment, element: segmentEl });
+
+                // allSegmentOfClikedBBOX의 모든 segment 저장
+                allSegmentOfClikedBBOX.map(segment => (selectedSegments.push({
+                    ...segment,
+                    element: segmentEl  // 클릭한 element
+                })));
+
+                allRelatedElements.forEach(el => {
+                    el.classList.add('multi-selected');
+                });
+            }
+        }
   
         // UI 업데이트  
         if (selectedSegments.length > 1) {  
