@@ -202,10 +202,13 @@ class KnowledgeManager:
     def _load_segments_file(self, user_id: int, file_id: str) -> Optional[List[Dict]]:
         """segments.json 파일 로드"""
         base_path = Path("/app/DATABASE/files/users") / str(user_id) / file_id
-        segments_files = list(base_path.glob("segments_*.json"))
+        segments_files = list(base_path.glob("segments_chunk_*.json"))
         if not segments_files:
-            logger.error(f"segments 파일을 찾을 수 없습니다: {base_path}")
-            return None
+            logger.error(f"docling chunking result segments 파일을 찾을 수 없습니다: {base_path}")
+            segments_files = list(base_path.glob("segments_*.json"))
+            if not segments_files:
+                logger.error(f"segments 파일을 찾을 수 없습니다: {base_path}")
+                return None
         
         segments_file = segments_files[0]
         
@@ -338,14 +341,23 @@ class KnowledgeManager:
                                 chunk_ids.append(f"{file_id}_{i+j}_{k}")
                                 
                                 # 원본 메타데이터 복사 후 청크별 수정
+                                # JSON.parse 사용을 위해 json.dumps 사용하여 문자열 변환
                                 metadata = {
                                     'file_id': file_id, 
                                     'user_id': str(user_id),
                                     'chunk_index': i+j, 
                                     'sub_chunk': k,
-                                    'segment_id': segment.get('id') or f"page{page_num}_{page_relative_index}",
+                                    'segment_id': (
+                                        f"page{segment.get('chunk_index')}" if segment.get('chunk_index') is not None # and segment.get('is_compound', False)
+                                        else segment.get('id') if segment.get('id')
+                                        else f"page{page_num}_{page_relative_index}"
+                                    ),
                                     'segment_type': segment.get('type', 'text'),
                                     'page_number': page_num,
+                                    'page_numbers': (
+                                        json.dumps(segment.get('page_numbers')) if segment.get('page_numbers') is not None
+                                        else json.dumps([page_num])
+                                    ),
                                     'text_length': len(chunk_texts[chunk_index + k])
                                 }
                                 # 원본 segment의 다른 필드들도 복사
@@ -394,12 +406,21 @@ class KnowledgeManager:
                             page_relative_index = page_indices[page_num]
                             page_indices[page_num] += 1
                             
+                            # JSON.parse 사용을 위해 json.dumps 사용하여 문자열 변환
                             metadatas.append({
                                 'file_id': file_id, 'user_id': str(user_id),
                                 'chunk_index': i+j, 
-                                'segment_id': s.get('id') or f"page{page_num}_{page_relative_index}",
+                                'segment_id': (
+                                    f"page{s.get('chunk_index')}" if s.get('chunk_index') is not None # and s.get('is_compound', False)
+                                    else s.get('id') if s.get('id')
+                                    else f"page{page_num}_{page_relative_index}"
+                                ),
                                 'segment_type': s.get('type', 'text'),
                                 'page_number': page_num,
+                                'page_numbers': (
+                                    json.dumps(s.get('page_numbers')) if s.get('page_numbers') is not None
+                                    else json.dumps([page_num])
+                                ),
                                 'text_length': len(s['text'])
                             })
 

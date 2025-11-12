@@ -67,6 +67,7 @@ class RagSourcesManager {
             console.log('🔍 RAG 문서 메타데이터:', doc.metadata);
             return {
                 pageNum: doc.metadata?.page_number || doc.page_number || doc.page || '?',
+                pageNums: doc.metadata?.page_numbers || `[${doc.metadata?.page_number || doc.page_number || doc.page || '?'}]`,
                 docType: doc.metadata?.segment_type || doc.type || 'Text',
                 similarity: doc.distance !== undefined ? Math.abs(((1 - doc.distance) * 100)).toFixed(1) : '?',
                 preview: doc.text ? doc.text.substring(0, 80) + '...' : '내용 없음',

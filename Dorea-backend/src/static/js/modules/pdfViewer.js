@@ -1375,15 +1375,37 @@ export function highlightSegmentText(sourceData, pageNum = null) {
     }
     
     // PDF 페이지에서 세그먼트 요소 찾기
-    const pageContainer = document.querySelector(`[data-page-number="${pageNum}"]`);
-    if (!pageContainer) {
-        console.log('🔍 페이지 컨테이너를 찾을 수 없음');
-        return false;
+    // pageNums 가 없는 경우는 기존 그대로
+    const pageNums = JSON.parse(sourceData.pageNums);
+    const pageContainers = [];
+    if (pageNums[0] === '?') {
+        const pageContainer = document.querySelector(`[data-page-number="${pageNum}"]`);
+        if (!pageContainer) {
+            console.log('🔍 페이지 컨테이너를 찾을 수 없음');
+            return false;
+        }
+        pageContainers.push(pageContainer);
+    } else {
+        pageNums.forEach((page_number, index) => {
+            const pageContainer = document.querySelector(`[data-page-number="${page_number}"]`);
+            if (!pageContainer) {
+                console.log(`🔍 ${page_number} 페이지 컨테이너를 찾을 수 없음`);
+            } else {
+                pageContainers.push(pageContainer);
+            }
+        });
+        if (pageContainers.length === 0) {
+            return false;
+        }
     }
+    const pageContainer = pageContainers[0];
     
     // 세그먼트 요소들 찾기 (실제 .segment 클래스 요소들)
-    const segmentElements = pageContainer.querySelectorAll('.segment');
-    console.log(`🔍 페이지 ${pageNum}에서 ${segmentElements.length}개의 세그먼트 요소 발견`);
+    // pageContainers의 모든 pageContainer 세그먼트 요소 Array에 함께 저장
+    const segmentElements = pageContainers.flatMap(pageContainer => {
+        return [...pageContainer.querySelectorAll('.segment')];
+    });
+    console.log(`🔍 페이지 ${pageNums}에서 ${segmentElements.length}개의 세그먼트 요소 발견`);
     
     let foundHighlight = false;
     
@@ -1395,19 +1417,26 @@ export function highlightSegmentText(sourceData, pageNum = null) {
         
         const segmentIndex = element.dataset.segmentIndex;
         const segmentId = element.dataset.segmentId;
+        const segmentIds = JSON.parse(element.dataset.segmentIds);
         
         console.log(`🔍 세그먼트 ${index + 1}:`, {
             segmentId,
             ragSegmentId: sourceData.segmentId,
-            match: sourceData.segmentId === segmentId
+            match: sourceData.segmentId === segmentId || segmentIds.includes(sourceData.segmentId),
         });
         
         // segmentId 직접 매칭 (예: "page10_8" vs "page10_8")
         const segmentIdMatch = sourceData.segmentId && 
                               segmentId && 
                               sourceData.segmentId === segmentId;
+        // element의 segmentIds 에 포함돼 있어도 매칭
+        const segmentIdsMatch = sourceData.segmentId &&
+                                segmentIds &&
+                                segmentIds.includes(sourceData.segmentId);
         
-        if (segmentIdMatch) {
+        const finalMatch = segmentIdMatch || segmentIdsMatch;
+
+        if (finalMatch) {
             // 원래 스타일 저장
             const originalStyle = {
                 backgroundColor: element.style.backgroundColor || getComputedStyle(element).backgroundColor,
@@ -1428,7 +1457,8 @@ export function highlightSegmentText(sourceData, pageNum = null) {
             const matchType = 'segmentId 매칭';
             console.log('✅ 세그먼트 매칭 성공:', {
                 ragSegmentId: sourceData.segmentId,
-                segmentId: segmentId
+                segmentId: segmentId,
+                segmentIds: segmentIds,
             });
         }
     });
