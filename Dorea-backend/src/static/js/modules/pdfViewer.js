@@ -1,6 +1,7 @@
 /* =====================================================
    Dorea PDF Viewer Module - PDF Rendering & Controls
    ===================================================== */
+// Modified by colabbear
 
 import { showNotification } from './utils.js';
 

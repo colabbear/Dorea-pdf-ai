@@ -1,6 +1,7 @@
 /* =====================================================
    RAG Sources Manager - 출처 패널 관리 시스템
    ===================================================== */
+// Modified by colabbear
 
 class RagSourcesManager {
     constructor() {

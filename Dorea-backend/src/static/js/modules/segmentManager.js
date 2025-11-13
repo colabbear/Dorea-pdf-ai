@@ -1,6 +1,7 @@
 /* =====================================================
    Dorea Segment Manager Module - Segment Selection & Overlay
    ===================================================== */
+// Modified by colabbear
 
 import { showNotification } from './utils.js';
 
