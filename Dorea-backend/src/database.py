@@ -1,3 +1,5 @@
+# Modified by colabbear
+
 # database.py - SQLite 데이터베이스 모델
 
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, JSON, ForeignKey, Boolean

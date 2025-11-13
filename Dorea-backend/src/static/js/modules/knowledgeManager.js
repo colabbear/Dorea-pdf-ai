@@ -1,3 +1,5 @@
+// Modified by colabbear
+
 // knowledgeManager.js - 지식 관리 및 임베딩 관리 모듈
 
 import { showNotification } from './utils.js';
