@@ -1,3 +1,5 @@
+# Modified by colabbear
+
 # knowledge_manager.py - RAG 임베딩 및 지식 관리 시스템
 
 import json

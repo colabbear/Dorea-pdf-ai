@@ -1,3 +1,5 @@
+# Modified by colabbear
+
 # auth.py - 인증 시스템 (API 키 + JWT)
 
 from fastapi import HTTPException, Depends, status, Header
